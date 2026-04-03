@@ -1,0 +1,24 @@
+services:
+  ai-company:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-company:latest
+    container_name: ai-company
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist data, workspace, shared directories
+      - ./data:/app/data
+      - ./workspace:/app/workspace
+      - ./shared:/app/shared
+      # Mount project-local Claude config so the CLI reads project/.claude/settings.json
+      - ./.claude:/root/.claude
+      # Mount local source for development (optional)
+      - ./ai_company:/app/ai_company:ro
+      - ./frontend:/app/frontend:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    working_dir: /app
+    restart: unless-stopped
+    # command: uvicorn ai_company.api.server:app --host 0.0.0.0 --port 8080 --reload

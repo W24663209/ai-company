@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>AI Company v5</title>
+  <link rel="stylesheet" href="xterm.css">
+  <script src="xterm.min.js"></script>
+  <script src="xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.37.0/src-min/ace.js"></script>
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface-hover: #334155;
+      --border: #334155;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --radius: 12px;
+      --shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 32px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .modal-overlay.show { opacity: 1; pointer-events: auto; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: min(560px, 92vw);
+      max-height: 80vh;
+      overflow: auto;
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .key-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+    .key-card code {
+      font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      word-break: break-all;
+    }
+    /* Ensure xterm fills the terminal container */
+    #terminal-container, #terminal-container .xterm, #terminal-container .xterm-viewport {
+      height: 100% !important;
+      width: 100% !important;
+    }
+    header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 18px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--primary-hover); box-shadow: 0 4px 20px rgba(99,102,241,0.4); }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: var(--surface-hover); }
+    .btn-danger { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid transparent; padding: 6px 12px; }
+    .btn-ghost:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+    .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    input, select, textarea {
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--primary); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+    .project-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .project-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--primary), #c084fc);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .project-card:hover { transform: translateY(-4px); border-color: var(--primary); }
+    .project-card:hover::before { opacity: 1; }
+    .project-card .title { font-weight: 600; font-size: 18px; margin-bottom: 8px; color: var(--text); }
+    .project-card .meta { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .tag.java { background: rgba(251,146,60,0.15); color: #fdba74; }
+    .tag.node { background: rgba(34,197,94,0.15); color: #86efac; }
+    .tag.mixed { background: rgba(168,85,247,0.15); color: #d8b4fe; }
+    .tag.status-pending { background: rgba(148,163,184,0.15); color: #cbd5e1; }
+    .tag.status-in_progress { background: rgba(245,158,11,0.15); color: #fcd34d; }
+    .tag.status-done { background: rgba(34,197,94,0.15); color: #86efac; }
+    .breadcrumbs { font-size: 14px; color: var(--text-muted); margin-bottom: 20px; }
+    .breadcrumbs a { color: var(--primary); cursor: pointer; font-weight: 500; }
+    .breadcrumbs a:hover { text-decoration: underline; }
+    h2 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+    h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text); }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+    th, td { text-align: left; padding: 14px 12px; border-bottom: 1px solid var(--border); }
+    th { color: var(--text-muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .actions .btn { padding: 6px 12px; font-size: 12px; }
+    .log {
+      background: var(--bg);
+      color: #e2e8f0;
+      padding: 16px;
+      border-radius: var(--radius);
+      font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow: auto;
+      border: 1px solid var(--border);
+    }
+    .hidden { display: none !important; }
+    #toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: var(--surface);
+      color: var(--text);
+      padding: 12px 18px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      border: 1px solid var(--border);
+      opacity: 0;
+      transition: all 0.3s;
+      pointer-events: none;
+      z-index: 100;
+      box-shadow: var(--shadow);
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    .tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+    .tab-btn {
+      background: transparent;
+      border: none;
+      padding: 10px 18px;
+      font-size: 14px;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: var(--radius);
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+    .tab-btn.active { color: var(--text); background: var(--surface); border: 1px solid var(--border); }
+    .panel.hidden { display: none; }
+    .empty { color: var(--text-muted); padding: 40px 0; text-align: center; font-size: 14px; }
+    .flex-between { display: flex; align-items: center; justify-content: space-between; }
+
+    /* Chat UI */
+    .chat-area {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .chat-header strong { font-size: 15px; color: var(--text); }
+    .chat-messages {
+      max-height: 400px;
+      overflow-y: auto;
+      margin-bottom: 16px;
+      padding-right: 8px;
+    }
+    .chat-messages::-webkit-scrollbar { width: 6px; }
+    .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .chat-bubble {
+      margin-bottom: 16px;
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .chat-bubble .label {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text-muted);
+    }
+    .chat-bubble .text {
+      background: var(--surface);
+      padding: 14px 18px;
+      border-radius: 16px;
+      border-bottom-left-radius: 4px;
+      display: inline-block;
+      max-width: 100%;
+      white-space: pre-wrap;
+      color: var(--text);
+      line-height: 1.6;
+      border: 1px solid var(--border);
+    }
+    .chat-bubble.user { text-align: right; }
+    .chat-bubble.user .text {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+      border-bottom-left-radius: 16px;
+      border-bottom-right-radius: 4px;
+      text-align: left;
+    }
+    .chat-bubble.user .label { color: #a5b4fc; }
+    .chat-bubble.claude .text {
+      background: rgba(99,102,241,0.08);
+      border-color: rgba(99,102,241,0.2);
+    }
+    .chat-bubble.claude .label { color: #818cf8; }
+    .chat-input-wrapper {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    .chat-input {
+      flex: 1;
+      min-height: 56px;
+      max-height: 150px;
+      resize: vertical;
+      padding: 14px 16px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .loading-dots {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+      padding: 14px 18px;
+    }
+    .loading-dots span {
+      width: 8px;
+      height: 8px;
+      background: #818cf8;
+      border-radius: 50%;
+      animation: bounce 1.4s infinite ease-in-out both;
+    }
+    .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0); }
+      40% { transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>AI Company</h1>
+      <div id="header-actions">
+        <button class="btn btn-secondary" onclick="openSshModal()">SSH 密钥</button>
+      </div>
+    </header>
+
+    <!-- 项目列表 -->
+    <div id="view-list">
+      <div class="card">
+        <h3 style="margin-top:0">创建新项目</h3>
+        <div class="form-row">
+          <input id="new-proj-name" placeholder="项目名称" style="min-width:180px">
+          <select id="new-proj-type">
+            <option value="java">Java</option>
+            <option value="node">Node</option>
+            <option value="mixed">Mixed</option>
+          </select>
+          <input id="new-proj-path" placeholder="路径 (留空自动使用 workspace)" style="min-width:220px;flex:1">
+          <button class="btn btn-primary" onclick="createProject()">创建项目</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0">从 Git 仓库拉取</h3>
+        <div class="form-row">
+          <input id="git-url" placeholder="Git 仓库地址 (SSH 或 HTTPS)" style="flex:1;min-width:260px">
+          <select id="git-ssh-key" style="min-width:160px">
+            <option value="">不使用 SSH 密钥</option>
+          </select>
+          <select id="git-type">
+            <option value="java">Java</option>
+            <option value="node">Node</option>
+            <option value="mixed">Mixed</option>
+          </select>
+          <input id="git-branch" placeholder="分支 (可选)" style="width:120px">
+        </div>
+        <div class="form-row" style="margin-top:10px">
+          <input id="git-name" placeholder="项目名称 (留空自动从仓库名提取)" style="min-width:180px">
+          <input id="git-path" placeholder="本地路径 (留空自动使用 workspace)" style="flex:1;min-width:220px">
+          <button class="btn btn-primary" onclick="cloneProject()">拉取项目</button>
+        </div>
+      </div>
+
+      <div id="projects-grid" class="grid">
+        <div class="empty" style="grid-column:1/-1">加载中...</div>
+      </div>
+    </div>
+
+    <!-- 项目详情 -->
+    <div id="view-project" class="hidden">
+      <div class="breadcrumbs"><a onclick="goHome()">项目列表</a> / <span id="proj-breadcrumb-name"></span></div>
+      <div class="card" style="padding:20px 24px">
+        <div class="flex-between">
+          <div>
+            <h2 id="proj-title" style="margin-bottom:4px"></h2>
+            <div class="meta" id="proj-meta" style="color:var(--text-muted);font-size:13px"></div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-danger" onclick="deleteCurrentProject()">删除项目</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="showProjectTab('requirements')">需求</button>
+        <button class="tab-btn" onclick="showProjectTab('builds')">构建</button>
+        <button class="tab-btn" onclick="showProjectTab('files')">文件</button>
+        <button class="tab-btn" onclick="showProjectTab('terminal')">终端</button>
+        <button class="tab-btn" onclick="showProjectTab('settings')">设置</button>
+      </div>
+
+      <div id="panel-requirements" class="panel">
+        <div class="card">
+          <h3>添加需求</h3>
+          <div class="form-row">
+            <input id="req-title" placeholder="需求标题" style="flex:1;max-width:260px">
+            <input id="req-desc" placeholder="描述" style="flex:2;max-width:360px">
+            <input id="req-priority" type="number" value="3" min="1" max="5" style="width:80px">
+            <button class="btn btn-primary" onclick="createReq()">添加</button>
+          </div>
+          <p class="meta" style="margin-top:10px;color:var(--text-muted);font-size:13px">
+            提示：添加需求后，点击需求右侧的 <strong>"工作"</strong> 按钮即可直接基于 Claude Code 处理该需求。
+          </p>
+        </div>
+
+        <div class="card" style="padding:0;overflow:hidden">
+          <table>
+            <thead>
+              <tr><th style="padding-left:24px">ID</th><th>标题</th><th>描述</th><th>状态</th><th style="width:90px">优先级</th><th style="padding-right:24px;width:160px">操作</th></tr>
+            </thead>
+            <tbody id="reqs-body">
+              <tr><td colspan="6" class="empty">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="panel-builds" class="panel hidden">
+        <div class="card">
+          <h3>运行构建</h3>
+          <div class="form-row">
+            <select id="build-type">
+              <option value="java">Java</option>
+              <option value="node">Node</option>
+            </select>
+            <select id="build-jdk" style="width:110px">
+              <option value="11">JDK 11</option>
+              <option value="17" selected>JDK 17</option>
+            </select>
+            <select id="build-node" style="width:110px;display:none">
+              <option value="18">Node 18</option>
+              <option value="20" selected>Node 20</option>
+              <option value="22">Node 22</option>
+              <option value="24">Node 24</option>
+            </select>
+            <select id="build-quick" style="min-width:200px" onchange="applyQuickBuild()">
+              <option value="">-- 快捷指令 --</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin-top:10px">
+            <input id="build-cmd" placeholder="自定义构建命令（可覆盖快捷指令）" style="flex:1;min-width:260px">
+            <button class="btn btn-primary" onclick="runBuild()">开始构建</button>
+          </div>
+          <div id="build-log" class="log hidden" style="margin-top:16px"></div>
+        </div>
+      </div>
+
+      <div id="panel-files" class="panel hidden">
+        <div class="card" style="display:flex;gap:16px;height:640px;padding:16px">
+          <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
+            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <strong style="font-size:14px">文件浏览</strong>
+              <button class="btn btn-secondary" onclick="refreshFileTree()" style="padding:4px 10px;font-size:12px">刷新</button>
+            </div>
+            <div id="file-tree" style="flex:1;overflow:auto;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px">
+              <div class="empty" style="padding:20px 0">加载中...</div>
+            </div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
+            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <div id="file-breadcrumb" style="font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">未选择文件</div>
+              <button id="file-save-btn" class="btn btn-primary" onclick="saveCurrentFile()" style="padding:6px 14px;font-size:13px;display:none">保存</button>
+            </div>
+            <div id="file-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
+            <div id="file-meta" class="meta" style="font-size:12px;color:var(--text-muted)"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="panel-terminal" class="panel hidden">
+        <div class="card" style="margin-bottom:20px">
+          <h3 style="margin-top:0">快捷脚本</h3>
+          <div id="terminal-scripts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
+            <span class="meta" style="font-size:13px;color:var(--text-muted)">暂无保存的脚本</span>
+          </div>
+          <div class="form-row">
+            <input id="script-name" placeholder="脚本名称" style="width:140px">
+            <input id="script-cmd" placeholder="命令内容" style="flex:1;min-width:200px">
+            <button class="btn btn-secondary" onclick="addTerminalScript()">添加</button>
+          </div>
+        </div>
+        <div class="card" id="terminal-card" style="padding:0;overflow:hidden;height:520px;display:flex;flex-direction:column;">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <strong>交互式终端</strong>
+            <div class="form-row" style="gap:8px;">
+              <select id="term-java" style="width:120px;padding:6px 10px;font-size:13px">
+                <option value="" selected>默认 Java</option>
+                <option value="11">Java 11</option>
+                <option value="17">Java 17</option>
+              </select>
+              <select id="term-node" style="width:120px;padding:6px 10px;font-size:13px">
+                <option value="" selected>默认 Node</option>
+                <option value="18">Node 18</option>
+                <option value="20">Node 20</option>
+                <option value="22">Node 22</option>
+                <option value="24">Node 24</option>
+              </select>
+            </div>
+            <span class="meta" style="font-size:12px">路径: <span id="terminal-path"></span></span>
+          </div>
+          <div id="terminal-container" style="flex:1;padding:8px;"></div>
+        </div>
+      </div>
+
+      <div id="panel-settings" class="panel hidden">
+        <div class="card">
+          <h3>项目记忆</h3>
+          <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">Claude 在处理需求时会自动读取这些上下文，帮助保持跨对话的一致性。</p>
+          <textarea id="proj-memory" placeholder="记录项目关键上下文、历史决策、约束条件等..." style="width:100%;min-height:120px"></textarea>
+        </div>
+        <div class="card">
+          <h3>智能体工作职责</h3>
+          <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">定义参与该项目的智能体角色、分工和行为准则。</p>
+          <textarea id="proj-roles" placeholder="例如：前端智能体负责 React 组件开发，后端智能体负责 API 实现..." style="width:100%;min-height:120px"></textarea>
+        </div>
+        <div class="card">
+          <h3>环境变量</h3>
+          <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">在构建和终端中自动注入的环境变量。每行一个，格式 KEY=VALUE。</p>
+          <textarea id="proj-env" placeholder="例如：\nNODE_ENV=production\nAPI_BASE_URL=https://api.example.com" style="width:100%;min-height:120px;font-family:monospace"></textarea>
+        </div>
+        <div class="card">
+          <h3>Claude Code Settings</h3>
+          <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">为该项目配置 Claude Code CLI 的 settings.json。调用 Claude 时会自动通过 --settings 加载。</p>
+          <textarea id="proj-claude-settings" placeholder='例如：\n{\n  "allowedTools": ["Read", "Edit", "Bash"],\n  "model": "claude-sonnet-4-6"\n}' style="width:100%;min-height:160px;font-family:monospace"></textarea>
+        </div>
+        <div class="form-row" style="justify-content:flex-end">
+          <button class="btn btn-primary" onclick="saveProjectSettings()">保存设置</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <!-- SSH Modal -->
+  <div id="ssh-modal" class="modal-overlay" onclick="if(event.target===this)closeSshModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 style="margin:0">SSH 密钥管理</h3>
+        <button class="btn btn-ghost" onclick="closeSshModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div id="ssh-keys-list">
+        <p class="meta" style="font-size:13px">加载中...</p>
+      </div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+      <h4 style="margin-bottom:10px">生成新密钥</h4>
+      <div class="form-row">
+        <input id="ssh-key-name" placeholder="密钥名称 (如: github-ai-company)" style="flex:1;min-width:160px">
+        <input id="ssh-key-email" placeholder="邮箱 (可选)" style="flex:1;min-width:160px">
+        <button class="btn btn-primary" onclick="generateSshKey()">生成</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const s = document.createElement('script');
+    s.src = 'app.js?v=' + Date.now();
+    document.body.appendChild(s);
+  </script>
+</body>
+</html>
