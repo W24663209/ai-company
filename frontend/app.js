@@ -5,7 +5,7 @@ let currentProject = null;
 let currentReqs = [];
 let activeChatReqId = null;
 let chatHistories = {}; // reqId -> [{role, text}]
-let isChatLoading = false;
+let chatLoadingState = {}; // reqId -> boolean
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -182,7 +182,7 @@ function renderChatRow(reqId) {
       </div>
     `).join('');
   }
-  const loadingBubble = isChatLoading ? `
+  const loadingBubble = chatLoadingState[reqId] ? `
     <div class="chat-bubble claude">
       <div class="label">Claude</div>
       <div class="loading-dots"><span></span><span></span><span></span></div>
@@ -200,9 +200,12 @@ function renderChatRow(reqId) {
             ${bubbles}
             ${loadingBubble}
           </div>
+          <div id="chat-files-${reqId}" class="chat-files-list" style="display:none;padding:8px 12px;background:#f8f9fa;border-top:1px solid var(--border);max-height:100px;overflow-y:auto;"></div>
           <div class="chat-input-wrapper">
             <textarea id="chat-input-${reqId}" class="chat-input" placeholder="输入你要告诉 Claude 的内容，按 Enter 发送"></textarea>
-            <button class="btn btn-primary" onclick="sendChat('${reqId}')">发送</button>
+            <input type="file" id="chat-file-${reqId}" style="display:none" onchange="handleChatFileSelect('${reqId}')" multiple>
+            <button class="btn btn-ghost" onclick="document.getElementById('chat-file-${reqId}').click()" title="上传文件">📎</button>
+            <button class="btn btn-primary" id="chat-send-btn-${reqId}" onclick="sendChat('${reqId}')">发送</button>
           </div>
         </div>
       </td>
@@ -290,44 +293,223 @@ function removeLoadingIndicator(reqId) {
 }
 
 async function sendChat(reqId) {
-  if (!currentProject || isChatLoading) return;
+  if (!currentProject || chatLoadingState[reqId]) return;
   const input = document.getElementById(`chat-input-${reqId}`);
   if (!input) return;
   const text = input.value.trim();
-  if (!text) return toast('请输入内容');
+  const files = chatFiles[reqId] || [];
+
+  if (!text && files.length === 0) return toast('请输入内容或选择文件');
+
+  // Build message with file contents
+  let fullMessage = text;
+  let fileDescription = '';
+
+  // Read and include file contents if any
+  if (files.length > 0) {
+    const fileContents = await Promise.all(files.map(async (file) => {
+      try {
+        const content = await readFileContent(file);
+        return `--- File: ${file.name} ---\n${content}\n--- End of ${file.name} ---`;
+      } catch (e) {
+        return `--- File: ${file.name} ---\n[无法读取文件内容: ${e.message}]\n--- End of ${file.name} ---`;
+      }
+    }));
+
+    // Build file description for display
+    fileDescription = files.map(f => f.name).join(', ');
+
+    // Combine text and files
+    const parts = [];
+    if (fullMessage) parts.push(fullMessage);
+    parts.push(...fileContents);
+    fullMessage = parts.join('\n\n');
+
+    // Clear files after reading
+    chatFiles[reqId] = [];
+    updateChatFileList(reqId);
+  }
 
   if (!chatHistories[reqId]) chatHistories[reqId] = [];
-  chatHistories[reqId].push({ role: 'user', text });
-  input.value = '';
-  isChatLoading = true;
 
-  appendChatBubble(reqId, 'user', text);
+  // Build display text showing both message and files
+  let displayParts = [];
+  if (text) displayParts.push(text);
+  if (fileDescription) displayParts.push(`[文件: ${fileDescription}]`);
+  const displayText = displayParts.join('\n') || '[空消息]';
+
+  chatHistories[reqId].push({ role: 'user', text: displayText, fullText: fullMessage });
+  input.value = '';
+  chatLoadingState[reqId] = true;
+
+  appendChatBubble(reqId, 'user', displayText);
   appendLoadingIndicator(reqId);
   scrollChatToBottom(reqId);
   await saveWorklog(reqId);
 
   setChatControlsEnabled(reqId, false);
 
+  // Use WebSocket for long-running Claude tasks (like terminal)
+  let ws = null;
+  let pingInterval = null;
+  let connectionTimeout = null;
+
   try {
-    const res = await api('POST', `/agents/chat?project_id=${encodeURIComponent(currentProject.id)}&requirement_id=${encodeURIComponent(reqId)}`, {
-      message: text
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/agents/ws/chat/${encodeURIComponent(currentProject.id)}/${encodeURIComponent(reqId)}`;
+
+    ws = new WebSocket(wsUrl);
+
+    // Connection timeout
+    connectionTimeout = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        ws.close();
+      }
+    }, 10000);
+
+    await new Promise((resolve, reject) => {
+      ws.onopen = () => {
+        clearTimeout(connectionTimeout);
+        resolve();
+      };
+      ws.onerror = () => reject(new Error('WebSocket connection failed'));
     });
-    chatHistories[reqId].push({ role: 'claude', text: res.response || '' });
-    isChatLoading = false;
+
+    // Start keepalive ping every 25 seconds (less than 30s proxy timeout)
+    pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send('ping');
+      }
+    }, 25000);
+
+    // Send message (with file contents if any)
+    ws.send(JSON.stringify({ message: fullMessage }));
+
+    // Create streaming bubble
     removeLoadingIndicator(reqId);
-    appendChatBubble(reqId, 'claude', res.response || '');
-    scrollChatToBottom(reqId);
-    setChatControlsEnabled(reqId, true);
+    const claudeBubble = document.createElement('div');
+    claudeBubble.className = 'chat-bubble claude';
+    claudeBubble.textContent = '';
+    const container = document.getElementById(`chat-history-${reqId}`);
+    if (container) container.appendChild(claudeBubble);
+
+    let fullResponse = '';
+    let hasReceivedData = false;
+
+    // Use requestAnimationFrame for smooth UI updates
+    let pendingUpdate = false;
+    let pendingScroll = false;
+
+    const updateUI = () => {
+      if (pendingUpdate) {
+        claudeBubble.textContent = fullResponse;
+        pendingUpdate = false;
+      }
+      if (pendingScroll) {
+        scrollChatToBottom(reqId);
+        pendingScroll = false;
+      }
+      if (chatLoadingState[reqId]) {
+        requestAnimationFrame(updateUI);
+      }
+    };
+    requestAnimationFrame(updateUI);
+
+    await new Promise((resolve, reject) => {
+      ws.onmessage = (event) => {
+        // Handle ping/pong
+        if (event.data === 'ping') {
+          ws.send('pong');
+          return;
+        }
+
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch (e) {
+          return;
+        }
+
+        if (data.type === 'ping') {
+          return;
+        }
+
+        hasReceivedData = true;
+
+        if (data.type === 'partial') {
+          fullResponse += data.data;
+          pendingUpdate = true;
+          pendingScroll = true;
+        } else if (data.type === 'done') {
+          claudeBubble.remove();
+          chatHistories[reqId].push({ role: 'claude', text: fullResponse });
+          chatLoadingState[reqId] = false;
+          appendChatBubble(reqId, 'claude', fullResponse);
+          scrollChatToBottom(reqId);
+          setChatControlsEnabled(reqId, true);
+          resolve();
+        } else if (data.type === 'error') {
+          chatLoadingState[reqId] = false;
+          reject(new Error(data.message));
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+        reject(new Error('WebSocket connection error'));
+      };
+
+      ws.onclose = (event) => {
+        clearInterval(pingInterval);
+        if (chatLoadingState[reqId]) {
+          if (hasReceivedData && fullResponse) {
+            // Connection closed but we got data, treat as success
+            claudeBubble.remove();
+            chatHistories[reqId].push({ role: 'claude', text: fullResponse });
+            chatLoadingState[reqId] = false;
+            appendChatBubble(reqId, 'claude', fullResponse);
+            scrollChatToBottom(reqId);
+            setChatControlsEnabled(reqId, true);
+            resolve();
+          } else {
+            reject(new Error('WebSocket closed unexpectedly'));
+          }
+        }
+      };
+    });
+
+    clearInterval(pingInterval);
     await saveWorklog(reqId);
+    ws.close();
+
   } catch (e) {
-    chatHistories[reqId].push({ role: 'claude', text: '出错了: ' + e.message });
-    isChatLoading = false;
-    removeLoadingIndicator(reqId);
-    appendChatBubble(reqId, 'claude', '出错了: ' + e.message);
-    scrollChatToBottom(reqId);
-    setChatControlsEnabled(reqId, true);
-    await saveWorklog(reqId);
-    toast('Claude 响应失败');
+    console.error('Chat error:', e);
+    clearInterval(pingInterval);
+    if (ws) ws.close();
+
+    // Fallback to HTTP API if WebSocket fails
+    try {
+      const res = await api('POST', `/agents/chat?project_id=${encodeURIComponent(currentProject.id)}&requirement_id=${encodeURIComponent(reqId)}`, {
+        message: text
+      });
+      removeLoadingIndicator(reqId);
+      chatHistories[reqId].push({ role: 'claude', text: res.response || '' });
+      chatLoadingState[reqId] = false;
+      appendChatBubble(reqId, 'claude', res.response || '');
+      scrollChatToBottom(reqId);
+      setChatControlsEnabled(reqId, true);
+      await saveWorklog(reqId);
+    } catch (httpError) {
+      const errorMsg = '出错了: ' + (e.message || '连接失败');
+      chatHistories[reqId].push({ role: 'claude', text: errorMsg });
+      chatLoadingState[reqId] = false;
+      removeLoadingIndicator(reqId);
+      appendChatBubble(reqId, 'claude', errorMsg);
+      scrollChatToBottom(reqId);
+      setChatControlsEnabled(reqId, true);
+      await saveWorklog(reqId);
+      toast('Claude 响应失败');
+    }
   }
 }
 
@@ -338,16 +520,96 @@ function scrollChatToBottom(reqId) {
 
 function setChatControlsEnabled(reqId, enabled) {
   const input = document.getElementById(`chat-input-${reqId}`);
-  const btn = input?.parentElement?.querySelector('button');
+  const sendBtn = document.getElementById(`chat-send-btn-${reqId}`);
+  const fileBtn = input?.parentElement?.querySelector('.btn-ghost');
+
   if (input) {
     input.disabled = !enabled;
     input.style.opacity = enabled ? '1' : '0.5';
+    if (!enabled) {
+      input.placeholder = 'Claude 回复中...';
+    } else {
+      input.placeholder = '输入你要告诉 Claude 的内容，按 Enter 发送';
+    }
   }
-  if (btn) {
-    btn.textContent = enabled ? '发送' : '发送中...';
-    btn.disabled = !enabled;
-    btn.style.opacity = enabled ? '1' : '0.7';
+
+  if (sendBtn) {
+    sendBtn.textContent = enabled ? '发送' : '回复中...';
+    sendBtn.disabled = !enabled;
+    sendBtn.style.opacity = enabled ? '1' : '0.7';
   }
+
+  if (fileBtn) {
+    fileBtn.disabled = !enabled;
+    fileBtn.style.opacity = enabled ? '1' : '0.5';
+  }
+}
+
+// Handle file selection for chat
+let chatFiles = {}; // reqId -> [files]
+
+function handleChatFileSelect(reqId) {
+  const fileInput = document.getElementById(`chat-file-${reqId}`);
+  const files = fileInput?.files;
+  if (!files || files.length === 0) return;
+
+  chatFiles[reqId] = chatFiles[reqId] || [];
+  for (const file of files) {
+    chatFiles[reqId].push(file);
+  }
+
+  // Update file list display
+  updateChatFileList(reqId);
+
+  toast(`已选择 ${files.length} 个文件`);
+}
+
+function updateChatFileList(reqId) {
+  const filesList = document.getElementById(`chat-files-${reqId}`);
+  const files = chatFiles[reqId] || [];
+
+  if (files.length === 0) {
+    filesList.style.display = 'none';
+    filesList.innerHTML = '';
+    return;
+  }
+
+  filesList.style.display = 'block';
+  filesList.innerHTML = files.map((file, index) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:13px;">
+      <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px;">
+        📄 ${file.name} (${formatFileSize(file.size)})
+      </span>
+      <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px;" onclick="removeChatFile('${reqId}', ${index})" title="删除">
+        ✕
+      </button>
+    </div>
+  `).join('');
+}
+
+function removeChatFile(reqId, index) {
+  if (chatFiles[reqId]) {
+    chatFiles[reqId].splice(index, 1);
+    updateChatFileList(reqId);
+  }
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Read file content as text
+async function readFileContent(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = (e) => reject(e);
+    reader.readAsText(file);
+  });
 }
 
 // keyboard shortcut: Enter in any chat textarea

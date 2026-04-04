@@ -76,7 +76,7 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
         env["TERM"] = "xterm-256color"
         # Set HOME and default PATH
         env["HOME"] = "/home/claudeuser"
-        env["PATH"] = "/home/claudeuser/.nvm/versions/node/v24.14.1/bin:/home/claudeuser/.sdkman/candidates/java/current/bin:/usr/local/bin:/usr/bin:/bin"
+        env["PATH"] = "/home/claudeuser/.local/bin:/home/claudeuser/.nvm/versions/node/v24.14.1/bin:/home/claudeuser/.sdkman/candidates/java/current/bin:/usr/local/bin:/usr/bin:/bin"
         # Source nvm and sdkman in environment
         env["NVM_DIR"] = "/home/claudeuser/.nvm"
         env["SDKMAN_DIR"] = "/home/claudeuser/.sdkman"
@@ -100,6 +100,16 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
         fcntl.fcntl(master_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
         loop = asyncio.get_event_loop()
+
+        # WebSocket keepalive
+        keepalive_task = None
+        async def keepalive() -> None:
+            while True:
+                try:
+                    await asyncio.sleep(30)
+                    await websocket.send_text("")
+                except Exception:
+                    break
 
         async def reader() -> None:
             while True:
@@ -133,6 +143,7 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
 
         read_task = asyncio.create_task(reader())
         write_task = asyncio.create_task(writer())
+        keepalive_task = asyncio.create_task(keepalive())
 
         try:
             await asyncio.gather(read_task, write_task)
@@ -141,6 +152,7 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
         finally:
             read_task.cancel()
             write_task.cancel()
+            keepalive_task.cancel()
             try:
                 os.kill(pid, signal.SIGTERM)
                 os.waitpid(pid, os.WNOHANG)

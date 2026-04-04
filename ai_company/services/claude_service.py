@@ -160,26 +160,110 @@ def launch_claude(
         ) from exc
 
 
-def _run_claude(
+async def _run_claude_async(
     claude_cmd: list[str],
     prompt: str,
     cwd: str,
     env: dict[str, str],
 ) -> dict[str, str | int]:
-    # Run Claude directly (container now runs as non-root user)
-    result = subprocess.run(
-        claude_cmd,
-        input=prompt,
-        cwd=cwd,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
+    """Run Claude in a thread pool to avoid blocking the event loop."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+
+    def run_subprocess():
+        return subprocess.run(
+            claude_cmd,
+            input=prompt,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    result = await loop.run_in_executor(None, run_subprocess)
     return {
         "stdout": result.stdout,
         "stderr": result.stderr,
         "returncode": result.returncode,
+    }
+
+
+def _run_claude_streaming(
+    claude_cmd: list[str],
+    prompt: str,
+    cwd: str,
+    env: dict[str, str],
+):
+    """Run Claude with streaming output for long-running tasks."""
+    import select
+    import fcntl
+
+    process = subprocess.Popen(
+        claude_cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+        env=env,
+        text=True,
+        bufsize=1,
+    )
+
+    # Send prompt
+    if process.stdin:
+        process.stdin.write(prompt + "\n")
+        process.stdin.flush()
+        process.stdin.close()
+
+    # Set non-blocking mode
+    for fd in [process.stdout, process.stderr]:
+        if fd:
+            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+    stdout_chunks = []
+    stderr_chunks = []
+
+    while True:
+        reads = [process.stdout, process.stderr]
+        readable, _, _ = select.select(reads, [], [], 0.1)
+
+        for fd in readable:
+            try:
+                data = fd.read(4096)
+                if data:
+                    if fd is process.stdout:
+                        stdout_chunks.append(data)
+                        yield {"type": "stdout", "data": data}
+                    else:
+                        stderr_chunks.append(data)
+                        yield {"type": "stderr", "data": data}
+            except (IOError, OSError):
+                pass
+
+        if process.poll() is not None:
+            # Read any remaining data
+            for fd in reads:
+                if fd:
+                    try:
+                        data = fd.read()
+                        if data:
+                            if fd is process.stdout:
+                                stdout_chunks.append(data)
+                                yield {"type": "stdout", "data": data}
+                            else:
+                                stderr_chunks.append(data)
+                                yield {"type": "stderr", "data": data}
+                    except:
+                        pass
+            break
+
+    yield {
+        "type": "done",
+        "stdout": "".join(stdout_chunks),
+        "stderr": "".join(stderr_chunks),
+        "returncode": process.returncode,
     }
 
 
@@ -270,3 +354,99 @@ def chat(
         raise AICompanyError(clean_stderr or "Claude exited with an error")
 
     return result
+
+async def _async_stream_claude(claude_cmd, prompt, cwd, env):
+    """Run streaming Claude in thread pool to avoid blocking event loop."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+
+    def stream_generator():
+        for chunk in _run_claude_streaming(claude_cmd, prompt, cwd, env):
+            yield chunk
+
+    # Use ThreadPoolExecutor to run synchronous generator in background
+    import concurrent.futures
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    def run_stream():
+        chunks = []
+        for chunk in stream_generator():
+            chunks.append(chunk)
+        return chunks
+
+    chunks = await loop.run_in_executor(executor, run_stream)
+    for chunk in chunks:
+        yield chunk
+
+
+async def chat_stream(
+    project_id: str,
+    requirement_id: str,
+    message: str,
+    working_dir: Optional[str] = None,
+):
+    """Stream Claude responses to prevent gateway timeout."""
+    project = get_project(project_id)
+    cwd = working_dir or project.path
+
+    sessions = _load_sessions(project_id)
+    existing_session = sessions.get(requirement_id)
+
+    env = get_ssh_env()
+    env["AI_COMPANY_SHARED_DIR"] = str(settings.shared_dir)
+    env["AI_COMPANY_PROJECT_ID"] = project.id
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        env["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
+    if os.environ.get("ANTHROPIC_BASE_URL"):
+        env["ANTHROPIC_BASE_URL"] = os.environ["ANTHROPIC_BASE_URL"]
+    if os.environ.get("OPENROUTER_API_KEY"):
+        env["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+    if os.environ.get("CLAUDE_API_KEY"):
+        env["CLAUDE_API_KEY"] = os.environ["CLAUDE_API_KEY"]
+
+    settings_path = _get_claude_settings_path(project)
+
+    def make_cmd(session_id: str | None, is_resume: bool) -> list[str]:
+        cmd = [
+            settings.claude_bin,
+            "-p",
+            "--print",
+            "--output-format",
+            "text",
+            "--permission-mode",
+            "bypassPermissions",
+        ]
+        if settings_path:
+            cmd.extend(["--settings", settings_path])
+        if is_resume and session_id:
+            cmd.extend(["--resume", session_id])
+        elif session_id:
+            cmd.extend(["--session-id", session_id])
+        return cmd
+
+    # Remove lock to allow concurrent requests - each session is independent
+    if existing_session:
+        cmd = make_cmd(existing_session, is_resume=True)
+        async for chunk in _async_stream_claude(cmd, message, cwd, env):
+            yield chunk
+
+        # Check if we need to restart session
+        if chunk.get("returncode", 0) != 0:
+            err = chunk.get("stderr", "")
+            if "No conversation found" in err or "not found" in err:
+                existing_session = None
+                _clear_session(project_id, requirement_id)
+
+    if not existing_session:
+        new_session = str(uuid.uuid4())
+        prompt = _build_system_prompt(project_id, requirement_id) + f"\n[USER]\n{message}\n"
+        cmd = make_cmd(new_session, is_resume=False)
+
+        async for chunk in _async_stream_claude(cmd, prompt, cwd, env):
+            yield chunk
+
+        if chunk.get("returncode") == 0:
+            _save_session(project_id, requirement_id, new_session)
+        else:
+            clean_stderr = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", chunk.get("stderr", ""))
+            raise AICompanyError(clean_stderr or "Claude exited with an error")

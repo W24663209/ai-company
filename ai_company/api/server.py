@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from ai_company.api.routers import agents, builds, files, git, projects, requirements, terminal
 from ai_company.core.config import settings
@@ -9,6 +10,15 @@ create_app = None
 def create_app_instance() -> FastAPI:
     app = FastAPI(title="AI Company", version="0.1.0")
     app.state.settings = settings
+
+    # CORS for SSE streaming
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     app.include_router(projects.router, prefix="/projects", tags=["projects"])
     app.include_router(requirements.router, prefix="/requirements", tags=["requirements"])
