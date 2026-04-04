@@ -6,19 +6,31 @@ services:
     image: ai-company:latest
     container_name: ai-company
     ports:
-      - "8080:8080"
+      - "8888:8080"
     volumes:
-      # Persist data, workspace, shared directories
       - ./data:/app/data
       - ./workspace:/app/workspace
       - ./shared:/app/shared
-      # Mount project-local Claude config so the CLI reads project/.claude/settings.json
       - ./.claude:/root/.claude
-      # Mount local source for development (optional)
       - ./ai_company:/app/ai_company:ro
       - ./frontend:/app/frontend:ro
     environment:
       - PYTHONUNBUFFERED=1
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
     working_dir: /app
     restart: unless-stopped
-    # command: uvicorn ai_company.api.server:app --host 0.0.0.0 --port 8080 --reload
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        useradd -m -s /bin/bash -u 1000 claudeuser 2>/dev/null || true
+        mkdir -p /home/claudeuser/.ssh /home/claudeuser/.claude
+        chown -R 1000:1000 /home/claudeuser
+        cp -r /root/.nvm /home/claudeuser/ 2>/dev/null || true
+        cp -r /root/.sdkman /home/claudeuser/ 2>/dev/null || true
+        cp -r /root/.claude /home/claudeuser/ 2>/dev/null || true
+        chown -R 1000:1000 /home/claudeuser/.nvm /home/claudeuser/.sdkman /home/claudeuser/.claude /app/data /app/workspace /app/shared 2>/dev/null || true
+        su - claudeuser -c 'export PATH=/home/claudeuser/.nvm/versions/node/v24.14.1/bin:/home/claudeuser/.sdkman/candidates/java/current/bin:/usr/local/bin:/usr/bin:/bin; export HOME=/home/claudeuser; cd /app && exec uvicorn ai_company.api.server:app --host 0.0.0.0 --port 8080'

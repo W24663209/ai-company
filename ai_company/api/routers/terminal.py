@@ -54,7 +54,6 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
 
     java_version = websocket.query_params.get("java_version")
     node_version = websocket.query_params.get("node_version")
-
     cwd = _resolve_cwd(project.path)
     if not Path(cwd).exists():
         await websocket.send_text(f"\r\n[错误] 项目路径不存在: {project.path}\r\n")
@@ -75,6 +74,7 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
         os.chdir(cwd)
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
+
         if project.env:
             env.update(project.env)
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException
 
+from ai_company.core.config import settings
 from ai_company.core.exceptions import ProjectNotFoundError
 from ai_company.services.project_service import get_project
 
@@ -64,6 +65,127 @@ def _is_text_file(path: Path) -> bool:
             return b"\x00" not in chunk
     except Exception:
         return False
+
+
+# Shared directory endpoints (cross-project)
+
+def _resolve_shared_path(rel_path: str) -> Path:
+    base = settings.shared_dir.resolve()
+    target = (base / rel_path.lstrip("/")) if rel_path else base
+    target = target.resolve()
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return target
+
+
+@router.get("/shared")
+def read_shared_file_or_list(path: str = ""):
+    target = _resolve_shared_path(path)
+
+    if target.is_dir():
+        items = []
+        try:
+            entries = sorted(target.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Permission denied")
+        for entry in entries:
+            try:
+                stat = entry.stat()
+                rel = str(entry.relative_to(settings.shared_dir.resolve()))
+                items.append({
+                    "name": entry.name,
+                    "path": rel.replace("\\", "/"),
+                    "is_dir": entry.is_dir(),
+                    "size": stat.st_size,
+                    "mtime": stat.st_mtime,
+                })
+            except Exception:
+                pass
+        return {
+            "type": "directory",
+            "path": path,
+            "items": items,
+        }
+
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    size = target.stat().st_size
+    if size > MAX_READ_SIZE:
+        return {
+            "type": "file",
+            "path": path,
+            "name": target.name,
+            "size": size,
+            "readable": False,
+            "reason": "File too large",
+        }
+
+    is_text = _is_text_file(target)
+    if not is_text:
+        return {
+            "type": "file",
+            "path": path,
+            "name": target.name,
+            "size": size,
+            "readable": False,
+            "reason": "Binary file",
+        }
+
+    try:
+        content = target.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Read failed: {exc}")
+
+    return {
+        "type": "file",
+        "path": path,
+        "name": target.name,
+        "size": size,
+        "readable": True,
+        "content": content,
+    }
+
+
+@router.post("/shared")
+def write_shared_file(path: str, content: str = Body(..., embed=True)):
+    target = _resolve_shared_path(path)
+
+    if target.is_dir():
+        raise HTTPException(status_code=400, detail="Path is a directory")
+
+    if len(content.encode("utf-8")) > MAX_WRITE_SIZE:
+        raise HTTPException(status_code=400, detail="Content too large")
+
+    if target.exists() and not _is_text_file(target):
+        raise HTTPException(status_code=400, detail="Binary files cannot be edited")
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Write failed: {exc}")
+
+    return {"ok": True, "path": path, "size": target.stat().st_size}
+
+
+@router.delete("/shared")
+def delete_shared_file(path: str):
+    target = _resolve_shared_path(path)
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        if target.is_dir():
+            import shutil
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {exc}")
+
+    return {"ok": True}
 
 
 @router.get("/{project_id}")
@@ -174,3 +296,5 @@ def delete_file_or_dir(project_id: str, path: str):
         raise HTTPException(status_code=500, detail=f"Delete failed: {exc}")
 
     return {"ok": True}
+
+

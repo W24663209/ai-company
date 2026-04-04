@@ -21,10 +21,7 @@ def run_agent(project_id: str, requirement_id: str, working_dir: str | None = No
 def chat(project_id: str, requirement_id: str, payload: dict):
     try:
         message = payload.get("message", "")
-        history = payload.get("history", [])
-        result = claude_service.chat(project_id, requirement_id, message, history=history)
-        if result["returncode"] != 0:
-            raise HTTPException(status_code=500, detail=result["stderr"] or "Claude exited with error")
+        result = claude_service.chat(project_id, requirement_id, message)
         return {"response": result["stdout"]}
     except AICompanyError as exc:
         raise HTTPException(status_code=500, detail=str(exc))

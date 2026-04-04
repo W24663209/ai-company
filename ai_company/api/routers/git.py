@@ -41,3 +41,13 @@ def clone_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Clone job not found")
     return job
+
+
+@router.post("/ssh-keys/sync-to-system")
+def sync_ssh_keys_to_system():
+    """Sync AI Company SSH keys to ~/.ssh for system-wide use."""
+    try:
+        result = git_service.sync_keys_to_system_ssh()
+        return result
+    except AICompanyError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

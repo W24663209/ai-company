@@ -13,19 +13,19 @@
   <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.37.0/src-min/ace.js"></script>
   <style>
     :root {
-      --primary: #6366f1;
-      --primary-hover: #4f46e5;
-      --bg: #0f172a;
-      --surface: #1e293b;
-      --surface-hover: #334155;
-      --border: #334155;
-      --text: #f1f5f9;
-      --text-muted: #94a3b8;
-      --success: #22c55e;
-      --warning: #f59e0b;
-      --danger: #ef4444;
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --bg: #ffffff;
+      --surface: #f8fafc;
+      --surface-hover: #f1f5f9;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --success: #16a34a;
+      --warning: #d97706;
+      --danger: #dc2626;
       --radius: 12px;
-      --shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
+      --shadow: 0 10px 30px -10px rgba(0,0,0,0.15);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -123,10 +123,10 @@
       border: 1px solid var(--border);
     }
     .btn-secondary:hover { background: var(--surface-hover); }
-    .btn-danger { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
-    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-danger { background: rgba(239,68,68,0.1); color: #991b1b; border: 1px solid rgba(239,68,68,0.3); }
+    .btn-danger:hover { background: rgba(239,68,68,0.18); }
     .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid transparent; padding: 6px 12px; }
-    .btn-ghost:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .btn-ghost:hover { color: var(--text); background: rgba(0,0,0,0.05); }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -184,12 +184,12 @@
       text-transform: uppercase;
       letter-spacing: 0.3px;
     }
-    .tag.java { background: rgba(251,146,60,0.15); color: #fdba74; }
-    .tag.node { background: rgba(34,197,94,0.15); color: #86efac; }
-    .tag.mixed { background: rgba(168,85,247,0.15); color: #d8b4fe; }
-    .tag.status-pending { background: rgba(148,163,184,0.15); color: #cbd5e1; }
-    .tag.status-in_progress { background: rgba(245,158,11,0.15); color: #fcd34d; }
-    .tag.status-done { background: rgba(34,197,94,0.15); color: #86efac; }
+    .tag.java { background: rgba(251,146,60,0.15); color: #c2410c; }
+    .tag.node { background: rgba(34,197,94,0.15); color: #15803d; }
+    .tag.mixed { background: rgba(168,85,247,0.15); color: #7e22ce; }
+    .tag.status-pending { background: rgba(148,163,184,0.15); color: #475569; }
+    .tag.status-in_progress { background: rgba(245,158,11,0.15); color: #b45309; }
+    .tag.status-done { background: rgba(34,197,94,0.15); color: #15803d; }
     .breadcrumbs { font-size: 14px; color: var(--text-muted); margin-bottom: 20px; }
     .breadcrumbs a { color: var(--primary); cursor: pointer; font-weight: 500; }
     .breadcrumbs a:hover { text-decoration: underline; }
@@ -198,12 +198,12 @@
     table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
     th, td { text-align: left; padding: 14px 12px; border-bottom: 1px solid var(--border); }
     th { color: var(--text-muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-    tr:hover td { background: rgba(255,255,255,0.02); }
+    tr:hover td { background: rgba(0,0,0,0.03); }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .actions .btn { padding: 6px 12px; font-size: 12px; }
     .log {
       background: var(--bg);
-      color: #e2e8f0;
+      color: var(--text);
       padding: 16px;
       border-radius: var(--radius);
       font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
@@ -243,7 +243,7 @@
       font-weight: 500;
       transition: all 0.2s;
     }
-    .tab-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+    .tab-btn:hover { color: var(--text); background: rgba(0,0,0,0.03); }
     .tab-btn.active { color: var(--text); background: var(--surface); border: 1px solid var(--border); }
     .panel.hidden { display: none; }
     .empty { color: var(--text-muted); padding: 40px 0; text-align: center; font-size: 14px; }
@@ -308,12 +308,12 @@
       border-bottom-right-radius: 4px;
       text-align: left;
     }
-    .chat-bubble.user .label { color: #a5b4fc; }
+    .chat-bubble.user .label { color: #4338ca; }
     .chat-bubble.claude .text {
-      background: rgba(99,102,241,0.08);
-      border-color: rgba(99,102,241,0.2);
+      background: rgba(99,102,241,0.06);
+      border-color: rgba(99,102,241,0.15);
     }
-    .chat-bubble.claude .label { color: #818cf8; }
+    .chat-bubble.claude .label { color: #4f46e5; }
     .chat-input-wrapper {
       display: flex;
       gap: 12px;
@@ -337,7 +337,7 @@
     .loading-dots span {
       width: 8px;
       height: 8px;
-      background: #818cf8;
+      background: #4f46e5;
       border-radius: 50%;
       animation: bounce 1.4s infinite ease-in-out both;
     }
@@ -419,6 +419,7 @@
         <button class="tab-btn active" onclick="showProjectTab('requirements')">需求</button>
         <button class="tab-btn" onclick="showProjectTab('builds')">构建</button>
         <button class="tab-btn" onclick="showProjectTab('files')">文件</button>
+        <button class="tab-btn" onclick="showProjectTab('shared')">共享</button>
         <button class="tab-btn" onclick="showProjectTab('terminal')">终端</button>
         <button class="tab-btn" onclick="showProjectTab('settings')">设置</button>
       </div>
@@ -493,10 +494,32 @@
           <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
             <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
               <div id="file-breadcrumb" style="font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">未选择文件</div>
-              <button id="file-save-btn" class="btn btn-primary" onclick="saveCurrentFile()" style="padding:6px 14px;font-size:13px;display:none">保存</button>
+              <button id="file-save-btn" class="btn btn-secondary" onclick="saveCurrentFile()" style="padding:6px 14px;font-size:13px;display:none">已保存</button>
             </div>
             <div id="file-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
             <div id="file-meta" class="meta" style="font-size:12px;color:var(--text-muted)"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="panel-shared" class="panel hidden">
+        <div class="card" style="display:flex;gap:16px;height:640px;padding:16px">
+          <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
+            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <strong style="font-size:14px">共享目录</strong>
+              <button class="btn btn-secondary" onclick="refreshSharedTree()" style="padding:4px 10px;font-size:12px">刷新</button>
+            </div>
+            <div id="shared-tree" style="flex:1;overflow:auto;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px">
+              <div class="empty" style="padding:20px 0">加载中...</div>
+            </div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
+            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <div id="shared-breadcrumb" style="font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">未选择文件</div>
+              <button id="shared-save-btn" class="btn btn-secondary" onclick="saveSharedFile()" style="padding:6px 14px;font-size:13px;display:none">已保存</button>
+            </div>
+            <div id="shared-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
+            <div id="shared-meta" class="meta" style="font-size:12px;color:var(--text-muted)"></div>
           </div>
         </div>
       </div>
@@ -515,7 +538,14 @@
         </div>
         <div class="card" id="terminal-card" style="padding:0;overflow:hidden;height:520px;display:flex;flex-direction:column;">
           <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-            <strong>交互式终端</strong>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <strong>交互式终端</strong>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer;">
+                <input type="checkbox" id="term-as-claudeuser" style="cursor:pointer;">
+                以 claudeuser 运行 (用于 Claude 登录)
+              </label>
+              <button class="btn btn-primary" onclick="openClaudeLoginTerminal()" style="padding:4px 12px;font-size:12px;">Claude 登录</button>
+            </div>
             <div class="form-row" style="gap:8px;">
               <select id="term-java" style="width:120px;padding:6px 10px;font-size:13px">
                 <option value="" selected>默认 Java</option>
@@ -578,6 +608,15 @@
         <p class="meta" style="font-size:13px">加载中...</p>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+      <div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:8px;padding:14px;margin-bottom:16px">
+        <div class="flex-between" style="margin-bottom:8px">
+          <h4 style="margin:0;color:var(--primary)">系统 SSH 同步</h4>
+          <button class="btn btn-primary" onclick="syncSshKeysToSystem()" style="padding:6px 14px;font-size:13px">一键同步到 ~/.ssh</button>
+        </div>
+        <p class="meta" style="font-size:12px;color:var(--text-muted);margin:0">
+          将 AI Company 的 SSH 密钥同步到系统 ~/.ssh 目录，使 Claude Code 终端可以直接使用 git 推送/拉取代码。
+        </p>
+      </div>
       <h4 style="margin-bottom:10px">生成新密钥</h4>
       <div class="form-row">
         <input id="ssh-key-name" placeholder="密钥名称 (如: github-ai-company)" style="flex:1;min-width:160px">

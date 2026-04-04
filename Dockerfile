@@ -59,9 +59,42 @@ COPY . .
 # Install Python dependencies and the local package
 RUN pip install --no-cache-dir -e "."
 
-# Ensure persistent directories exist
-RUN mkdir -p /app/data /app/workspace /app/shared /root/.claude
+# Create non-root user for Claude Code
+RUN useradd -m -s /bin/bash -u 1000 claudeuser && \
+    chown -R claudeuser:claudeuser /app
+
+# Setup SSH directory for non-root user
+RUN mkdir -p /home/claudeuser/.ssh && \
+    chown -R claudeuser:claudeuser /home/claudeuser/.ssh && \
+    chmod 700 /home/claudeuser/.ssh
+
+# Ensure persistent directories exist with proper permissions
+RUN mkdir -p /app/data /app/workspace /app/shared /root/.claude && \
+    chown -R claudeuser:claudeuser /app/data /app/workspace /app/shared
 
 EXPOSE 8080
 
-CMD ["uvicorn", "ai_company.api.server:app", "--host", "0.0.0.0", "--port", "8080"]
+# Create entrypoint script to switch to non-root user
+RUN echo '#!/bin/bash\n\
+# Copy .claude config to claudeuser if exists\n\
+if [ -d /root/.claude ] && [ ! -d /home/claudeuser/.claude ]; then\n\
+    cp -r /root/.claude /home/claudeuser/\n\
+    chown -R claudeuser:claudeuser /home/claudeuser/.claude\n\
+fi\n\
+# Copy .nvm to claudeuser if needed\n\
+if [ -d /root/.nvm ] && [ ! -d /home/claudeuser/.nvm ]; then\n\
+    cp -r /root/.nvm /home/claudeuser/\n\
+    chown -R claudeuser:claudeuser /home/claudeuser/.nvm\n\
+fi\n\
+# Copy .sdkman to claudeuser if needed\n\
+if [ -d /root/.sdkman ] && [ ! -d /home/claudeuser/.sdkman ]; then\n\
+    cp -r /root/.sdkman /home/claudeuser/\n\
+    chown -R claudeuser:claudeuser /home/claudeuser/.sdkman\n\
+fi\n\
+# Ensure PATH is set\n\
+export PATH="/home/claudeuser/.nvm/versions/node/v24.14.1/bin:/home/claudeuser/.sdkman/candidates/java/current/bin:/usr/local/bin:/usr/bin:/bin"\n\
+# Run as claudeuser\n\
+exec su - claudeuser -c "cd /app && PATH=$PATH uvicorn ai_company.api.server:app --host 0.0.0.0 --port 8080"\n\
+' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]

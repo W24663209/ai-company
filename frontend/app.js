@@ -116,6 +116,12 @@ function showProjectTab(name) {
       if (aceEditor) aceEditor.resize();
     }, 50);
   }
+  if (name === 'shared') {
+    loadSharedTree('');
+    setTimeout(() => {
+      if (sharedAceEditor) sharedAceEditor.resize();
+    }, 50);
+  }
   if (name === 'terminal') {
     connectTerminal();
     renderTerminalScripts();
@@ -304,8 +310,7 @@ async function sendChat(reqId) {
 
   try {
     const res = await api('POST', `/agents/chat?project_id=${encodeURIComponent(currentProject.id)}&requirement_id=${encodeURIComponent(reqId)}`, {
-      message: text,
-      history: chatHistories[reqId].slice(0, -1)
+      message: text
     });
     chatHistories[reqId].push({ role: 'claude', text: res.response || '' });
     isChatLoading = false;
@@ -363,8 +368,11 @@ async function createReq() {
   const description = document.getElementById('req-desc').value.trim();
   const priority = document.getElementById('req-priority').value;
   if (!title) return toast('请输入标题');
-  const body = new URLSearchParams({ project_id: currentProject.id, title, description, priority });
-  await api('POST', '/requirements', body);
+  const url = '/requirements?project_id=' + encodeURIComponent(currentProject.id)
+    + '&title=' + encodeURIComponent(title)
+    + '&description=' + encodeURIComponent(description)
+    + '&priority=' + encodeURIComponent(priority);
+  await api('POST', url);
   toast('需求添加成功');
   document.getElementById('req-title').value = '';
   document.getElementById('req-desc').value = '';
@@ -516,19 +524,19 @@ function initXTerm() {
     fontSize: 14,
     fontFamily: '"SF Mono", Monaco, "Cascadia Code", monospace',
     theme: {
-      background: '#0f172a',
-      foreground: '#e2e8f0',
-      cursor: '#6366f1',
-      selectionBackground: '#334155',
-      black: '#0f172a',
-      brightBlack: '#334155',
-      red: '#ef4444',
-      green: '#22c55e',
-      yellow: '#f59e0b',
-      blue: '#3b82f6',
-      magenta: '#a855f7',
-      cyan: '#06b6d4',
-      white: '#f1f5f9'
+      background: '#ffffff',
+      foreground: '#1f2937',
+      cursor: '#4f46e5',
+      selectionBackground: '#e2e8f0',
+      black: '#1f2937',
+      brightBlack: '#64748b',
+      red: '#dc2626',
+      green: '#16a34a',
+      yellow: '#d97706',
+      blue: '#2563eb',
+      magenta: '#9333ea',
+      cyan: '#0891b2',
+      white: '#f8fafc'
     },
     convertEol: true,
     scrollback: 1000
@@ -543,8 +551,11 @@ function initXTerm() {
   }
 }
 
-function connectTerminal() {
+function connectTerminal(asUser = null) {
   if (!currentProject) return;
+
+  // Store asUser for _doConnectTerminal to use
+  window.terminalAsUser = asUser;
 
   // Ensure panel is visible before init so xterm can measure size
   const panel = document.getElementById('panel-terminal');
@@ -562,6 +573,13 @@ function connectTerminal() {
   }
 }
 
+function openClaudeLoginTerminal() {
+  // Switch to terminal tab and connect as claudeuser
+  showProjectTab('terminal');
+  connectTerminal('claudeuser');
+  toast('终端已以 claudeuser 身份打开，请运行: claude login');
+}
+
 function _doConnectTerminal() {
   document.getElementById('terminal-path').textContent = currentProject.path;
 
@@ -571,8 +589,10 @@ function _doConnectTerminal() {
 
   const javaVer = document.getElementById('term-java').value || '';
   const nodeVer = document.getElementById('term-node').value || '';
+  const asUser = window.terminalAsUser || '';
   const qs = [];
   if (javaVer) qs.push('java_version=' + encodeURIComponent(javaVer));
+  if (asUser) qs.push('as_user=' + encodeURIComponent(asUser));
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${currentProject.id}` + (qs.length ? '?' + qs.join('&') : '');
@@ -787,11 +807,25 @@ let fileTreeExpanded = new Set();
 let currentFilePath = null;
 let currentFileContent = null;
 let aceEditor = null;
+let fileAutoSaveTimer = null;
+let isFileLoading = false;
+
+function setSaveBtnState(id, state) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  if (state === 'saving') {
+    btn.textContent = '保存中...';
+    btn.className = 'btn btn-primary';
+  } else if (state === 'saved') {
+    btn.textContent = '已保存';
+    btn.className = 'btn btn-secondary';
+  }
+}
 
 function initAceEditor() {
   if (aceEditor || !window.ace) return;
   aceEditor = ace.edit('file-editor');
-  aceEditor.setTheme('ace/theme/monokai');
+  aceEditor.setTheme('ace/theme/chrome');
   aceEditor.session.setOptions({
     tabSize: 2,
     useSoftTabs: true,
@@ -799,6 +833,12 @@ function initAceEditor() {
   });
   aceEditor.setShowPrintMargin(false);
   aceEditor.renderer.setScrollMargin(8, 8);
+  aceEditor.session.on('change', () => {
+    if (isFileLoading) return;
+    if (fileAutoSaveTimer) clearTimeout(fileAutoSaveTimer);
+    setSaveBtnState('file-save-btn', 'saving');
+    fileAutoSaveTimer = setTimeout(() => saveCurrentFile(true), 800);
+  });
 }
 
 function getAceModeFromFilename(name) {
@@ -850,7 +890,9 @@ function getAceModeFromFilename(name) {
 function setAceEditorContent(content, editable, filename) {
   initAceEditor();
   if (!aceEditor) return;
+  isFileLoading = true;
   aceEditor.setValue(content || '', -1);
+  isFileLoading = false;
   aceEditor.setReadOnly(!editable);
   aceEditor.clearSelection();
   aceEditor.session.setMode('ace/mode/' + getAceModeFromFilename(filename || ''));
@@ -918,7 +960,7 @@ function renderFileTreeItems(items, parentPath) {
       html += `
         <div style="${indent}">
           <div class="file-tree-item" onclick="toggleDir('${encodeURIComponent(item.path)}')" style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--text);"
-            onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+            onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'">
             <span>${expanded ? '📂' : icon}</span>
             <span style="font-weight:500">${escapeHtml(item.name)}</span>
           </div>
@@ -932,7 +974,7 @@ function renderFileTreeItems(items, parentPath) {
     } else {
       html += `
         <div class="file-tree-item" onclick="openFile('${encodeURIComponent(item.path)}')" style="${indent};display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--text-muted);"
-          onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'"
+          onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'"
           onmousedown="this.style.color='var(--primary)'" onmouseup="this.style.color='var(--text-muted)'">
           <span>${icon}</span>
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.name)}</span>
@@ -969,7 +1011,7 @@ async function loadDirChildren(path) {
         html += `
           <div style="${indent}">
             <div class="file-tree-item" onclick="event.stopPropagation();toggleDir('${encodeURIComponent(item.path)}')" style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--text);"
-              onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+              onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'">
               <span>${expanded ? '📂' : icon}</span>
               <span style="font-weight:500">${escapeHtml(item.name)}</span>
             </div>
@@ -982,7 +1024,7 @@ async function loadDirChildren(path) {
       } else {
         html += `
           <div class="file-tree-item" onclick="event.stopPropagation();openFile('${encodeURIComponent(item.path)}')" style="${indent};display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--text-muted);"
-            onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'"
+            onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'"
             onmousedown="this.style.color='var(--primary)'" onmouseup="this.style.color='var(--text-muted)'">
             <span>${icon}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.name)}</span>
@@ -1046,6 +1088,7 @@ async function openFile(path) {
       setAceEditorContent(`无法编辑: ${data.reason || '不可读文件'}`, false, decoded);
     } else {
       saveBtn.style.display = 'inline-flex';
+      setSaveBtnState('file-save-btn', 'saved');
       meta.textContent = `大小: ${formatBytes(data.size)} · 可编辑`;
       currentFileContent = data.content;
       setAceEditorContent(data.content, true, decoded);
@@ -1061,14 +1104,231 @@ function formatBytes(b) {
   return (b / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-async function saveCurrentFile() {
+async function saveCurrentFile(auto = false) {
   if (!currentProject || !currentFilePath) return;
   const content = aceEditor ? aceEditor.getValue() : '';
   try {
     await api('POST', `/files/${encodeURIComponent(currentProject.id)}?path=${encodeURIComponent(currentFilePath)}`, { content });
     currentFileContent = content;
-    toast('文件已保存');
+    setSaveBtnState('file-save-btn', 'saved');
+    if (!auto) toast('文件已保存');
   } catch (e) {
+    setSaveBtnState('file-save-btn', 'saved');
+    toast('保存失败: ' + e.message);
+  }
+}
+
+// Shared directory editor
+let sharedTreeExpanded = new Set();
+let currentSharedPath = null;
+let sharedAceEditor = null;
+let sharedAutoSaveTimer = null;
+let isSharedLoading = false;
+
+function initSharedAceEditor() {
+  if (sharedAceEditor || !window.ace) return;
+  sharedAceEditor = ace.edit('shared-editor');
+  sharedAceEditor.setTheme('ace/theme/chrome');
+  sharedAceEditor.session.setOptions({
+    tabSize: 2,
+    useSoftTabs: true,
+    wrap: true,
+  });
+  sharedAceEditor.setShowPrintMargin(false);
+  sharedAceEditor.renderer.setScrollMargin(8, 8);
+  sharedAceEditor.session.on('change', () => {
+    if (isSharedLoading) return;
+    if (sharedAutoSaveTimer) clearTimeout(sharedAutoSaveTimer);
+    setSaveBtnState('shared-save-btn', 'saving');
+    sharedAutoSaveTimer = setTimeout(() => saveSharedFile(true), 800);
+  });
+}
+
+function setSharedAceEditorContent(content, editable, filename) {
+  initSharedAceEditor();
+  if (!sharedAceEditor) return;
+  isSharedLoading = true;
+  sharedAceEditor.setValue(content || '', -1);
+  isSharedLoading = false;
+  sharedAceEditor.setReadOnly(!editable);
+  sharedAceEditor.clearSelection();
+  sharedAceEditor.session.setMode('ace/mode/' + getAceModeFromFilename(filename || ''));
+  if (editable) {
+    sharedAceEditor.focus();
+    sharedAceEditor.setOptions({ highlightActiveLine: true, highlightGutterLine: true });
+    sharedAceEditor.renderer.$cursorLayer.element.style.display = '';
+  } else {
+    sharedAceEditor.setOptions({ highlightActiveLine: false, highlightGutterLine: false });
+    sharedAceEditor.renderer.$cursorLayer.element.style.display = 'none';
+  }
+}
+
+async function loadSharedTree(path) {
+  try {
+    const data = await api('GET', `/files/shared?path=${encodeURIComponent(path)}`);
+    if (data.type === 'directory') {
+      renderSharedTreeItems(data.items, path);
+    }
+  } catch (e) {
+    toast('加载共享目录失败: ' + e.message);
+  }
+}
+
+function renderSharedTreeItems(items, parentPath) {
+  const container = document.getElementById('shared-tree');
+  if (!container) return;
+  if (!items || !items.length) {
+    container.innerHTML = '<div class="empty" style="padding:20px 0">空目录</div>';
+    return;
+  }
+  let html = '<div style="display:flex;flex-direction:column;gap:2px">';
+  items.forEach(item => {
+    const icon = getFileIcon(item.is_dir, item.name);
+    const indent = 'padding-left:8px';
+    if (item.is_dir) {
+      const expanded = sharedTreeExpanded.has(item.path);
+      html += `
+        <div style="${indent}">
+          <div class="file-tree-item" onclick="toggleSharedDir('${encodeURIComponent(item.path)}')" style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--text);"
+            onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'">
+            <span>${expanded ? '📂' : icon}</span>
+            <span style="font-weight:500">${escapeHtml(item.name)}</span>
+          </div>
+          <div id="shared-tree-children-${safeBase64Id(item.path)}" style="display:${expanded ? 'block' : 'none'};padding-left:12px"></div>
+        </div>
+      `;
+      if (expanded) {
+        setTimeout(() => loadSharedDirChildren(item.path), 0);
+      }
+    } else {
+      html += `
+        <div class="file-tree-item" onclick="openSharedFile('${encodeURIComponent(item.path)}')" style="${indent};display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--text-muted);"
+          onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'"
+          onmousedown="this.style.color='var(--primary)'" onmouseup="this.style.color='var(--text-muted)'">
+          <span>${icon}</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.name)}</span>
+        </div>
+      `;
+    }
+  });
+  html += '</div>';
+  if (!parentPath) {
+    container.innerHTML = html;
+  } else {
+    const el = document.getElementById('shared-tree-children-' + safeBase64Id(parentPath));
+    if (el) el.innerHTML = html;
+  }
+}
+
+async function loadSharedDirChildren(path) {
+  try {
+    const data = await api('GET', `/files/shared?path=${encodeURIComponent(path)}`);
+    const el = document.getElementById('shared-tree-children-' + safeBase64Id(path));
+    if (!el) return;
+    if (data.type !== 'directory' || !data.items || !data.items.length) {
+      el.innerHTML = '<div style="padding:4px 8px;font-size:12px;color:var(--text-muted)">空目录</div>';
+      return;
+    }
+    let html = '<div style="display:flex;flex-direction:column;gap:2px">';
+    data.items.forEach(item => {
+      const icon = getFileIcon(item.is_dir, item.name);
+      const indent = 'padding-left:8px';
+      if (item.is_dir) {
+        const expanded = sharedTreeExpanded.has(item.path);
+        html += `
+          <div style="${indent}">
+            <div class="file-tree-item" onclick="event.stopPropagation();toggleSharedDir('${encodeURIComponent(item.path)}')" style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--text);"
+              onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'">
+              <span>${expanded ? '📂' : icon}</span>
+              <span style="font-weight:500">${escapeHtml(item.name)}</span>
+            </div>
+            <div id="shared-tree-children-${safeBase64Id(item.path)}" style="display:${expanded ? 'block' : 'none'};padding-left:12px"></div>
+          </div>
+        `;
+        if (expanded) {
+          setTimeout(() => loadSharedDirChildren(item.path), 0);
+        }
+      } else {
+        html += `
+          <div class="file-tree-item" onclick="event.stopPropagation();openSharedFile('${encodeURIComponent(item.path)}')" style="${indent};display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--text-muted);"
+            onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'"
+            onmousedown="this.style.color='var(--primary)'" onmouseup="this.style.color='var(--text-muted)'">
+            <span>${icon}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.name)}</span>
+          </div>
+        `;
+      }
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function toggleSharedDir(path) {
+  const decoded = decodeURIComponent(path);
+  if (sharedTreeExpanded.has(decoded)) {
+    sharedTreeExpanded.delete(decoded);
+  } else {
+    sharedTreeExpanded.add(decoded);
+  }
+  await refreshSharedTree();
+}
+
+async function refreshSharedTree() {
+  await loadSharedTree('');
+  sharedTreeExpanded.forEach(p => {
+    const el = document.getElementById('shared-tree-children-' + safeBase64Id(p));
+    if (el) {
+      el.style.display = 'block';
+      loadSharedDirChildren(p);
+    }
+  });
+}
+
+async function openSharedFile(path) {
+  const decoded = decodeURIComponent(path);
+  currentSharedPath = decoded;
+  try {
+    const data = await api('GET', `/files/shared?path=${encodeURIComponent(decoded)}`);
+    const breadcrumb = document.getElementById('shared-breadcrumb');
+    const saveBtn = document.getElementById('shared-save-btn');
+    const meta = document.getElementById('shared-meta');
+
+    if (data.type === 'directory') {
+      breadcrumb.textContent = decoded || '共享根目录';
+      saveBtn.style.display = 'none';
+      meta.textContent = '';
+      setSharedAceEditorContent('', false, '');
+      return;
+    }
+
+    breadcrumb.textContent = decoded;
+    if (!data.readable) {
+      saveBtn.style.display = 'none';
+      meta.textContent = `大小: ${formatBytes(data.size)} · ${data.reason || '不可读'}`;
+      setSharedAceEditorContent(`无法编辑: ${data.reason || '不可读文件'}`, false, decoded);
+    } else {
+      saveBtn.style.display = 'inline-flex';
+      setSaveBtnState('shared-save-btn', 'saved');
+      meta.textContent = `大小: ${formatBytes(data.size)} · 可编辑`;
+      setSharedAceEditorContent(data.content, true, decoded);
+    }
+  } catch (e) {
+    toast('打开共享文件失败: ' + e.message);
+  }
+}
+
+async function saveSharedFile(auto = false) {
+  if (!currentSharedPath) return;
+  const content = sharedAceEditor ? sharedAceEditor.getValue() : '';
+  try {
+    await api('POST', `/files/shared?path=${encodeURIComponent(currentSharedPath)}`, { content });
+    setSaveBtnState('shared-save-btn', 'saved');
+    if (!auto) toast('共享文件已保存');
+  } catch (e) {
+    setSaveBtnState('shared-save-btn', 'saved');
     toast('保存失败: ' + e.message);
   }
 }
@@ -1146,6 +1406,34 @@ async function deleteSshKey(name) {
     await loadSshKeys();
   } catch (e) {
     toast('删除失败: ' + e.message);
+  }
+}
+
+async function syncSshKeysToSystem() {
+  try {
+    toast('正在同步 SSH 密钥到 ~/.ssh...');
+    const result = await api('POST', '/git/ssh-keys/sync-to-system');
+
+    let msg = '';
+    if (result.synced && result.synced.length > 0) {
+      msg += `已同步 ${result.synced.length} 个密钥: ${result.synced.join(', ')}`;
+    }
+    if (result.skipped && result.skipped.length > 0) {
+      msg += (msg ? '\n' : '') + `跳过 ${result.skipped.length} 个: ${result.skipped.join(', ')}`;
+    }
+    if (result.errors && result.errors.length > 0) {
+      msg += (msg ? '\n' : '') + `错误: ${result.errors.join(', ')}`;
+    }
+
+    if (result.synced && result.synced.length > 0) {
+      toast('SSH 密钥同步成功');
+    } else if (result.errors && result.errors.length > 0) {
+      toast('同步失败: ' + result.errors[0]);
+    } else {
+      toast('没有可同步的密钥');
+    }
+  } catch (e) {
+    toast('同步失败: ' + e.message);
   }
 }
 
