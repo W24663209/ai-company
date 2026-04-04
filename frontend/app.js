@@ -551,11 +551,8 @@ function initXTerm() {
   }
 }
 
-function connectTerminal(asUser = null) {
+function connectTerminal() {
   if (!currentProject) return;
-
-  // Store asUser for _doConnectTerminal to use
-  window.terminalAsUser = asUser;
 
   // Ensure panel is visible before init so xterm can measure size
   const panel = document.getElementById('panel-terminal');
@@ -573,12 +570,6 @@ function connectTerminal(asUser = null) {
   }
 }
 
-function openClaudeLoginTerminal() {
-  // Switch to terminal tab and connect as claudeuser
-  showProjectTab('terminal');
-  connectTerminal('claudeuser');
-  toast('终端已以 claudeuser 身份打开，请运行: claude login');
-}
 
 function _doConnectTerminal() {
   document.getElementById('terminal-path').textContent = currentProject.path;
@@ -589,10 +580,8 @@ function _doConnectTerminal() {
 
   const javaVer = document.getElementById('term-java').value || '';
   const nodeVer = document.getElementById('term-node').value || '';
-  const asUser = window.terminalAsUser || '';
   const qs = [];
   if (javaVer) qs.push('java_version=' + encodeURIComponent(javaVer));
-  if (asUser) qs.push('as_user=' + encodeURIComponent(asUser));
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${currentProject.id}` + (qs.length ? '?' + qs.join('&') : '');

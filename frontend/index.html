@@ -538,14 +538,7 @@
         </div>
         <div class="card" id="terminal-card" style="padding:0;overflow:hidden;height:520px;display:flex;flex-direction:column;">
           <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-            <div style="display:flex;align-items:center;gap:12px;">
-              <strong>交互式终端</strong>
-              <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer;">
-                <input type="checkbox" id="term-as-claudeuser" style="cursor:pointer;">
-                以 claudeuser 运行 (用于 Claude 登录)
-              </label>
-              <button class="btn btn-primary" onclick="openClaudeLoginTerminal()" style="padding:4px 12px;font-size:12px;">Claude 登录</button>
-            </div>
+            <strong>交互式终端</strong>
             <div class="form-row" style="gap:8px;">
               <select id="term-java" style="width:120px;padding:6px 10px;font-size:13px">
                 <option value="" selected>默认 Java</option>
