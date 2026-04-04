@@ -74,6 +74,12 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
         os.chdir(cwd)
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
+        # Set HOME and default PATH
+        env["HOME"] = "/home/claudeuser"
+        env["PATH"] = "/home/claudeuser/.nvm/versions/node/v24.14.1/bin:/home/claudeuser/.sdkman/candidates/java/current/bin:/usr/local/bin:/usr/bin:/bin"
+        # Source nvm and sdkman in environment
+        env["NVM_DIR"] = "/home/claudeuser/.nvm"
+        env["SDKMAN_DIR"] = "/home/claudeuser/.sdkman"
 
         if project.env:
             env.update(project.env)
@@ -86,9 +92,8 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
             if env.get("JAVA_HOME"):
                 env["PATH"] = f"{env['JAVA_HOME']}/bin:{env['PATH']}"
 
-        # Node version is handled by the frontend sending nvm use after shell open,
-        # because shell startup scripts (e.g. zshrc) often override PATH/nvm.
-        os.execle(shell, shell, env)
+        # Start shell as login shell to load .bash_profile
+        os.execle(shell, shell, "-l", env)
     else:
         os.close(slave_fd)
         fl = fcntl.fcntl(master_fd, fcntl.F_GETFL)

@@ -14,6 +14,7 @@ services:
       - ./.claude:/home/claudeuser/.claude
       - ./ai_company:/app/ai_company:ro
       - ./frontend:/app/frontend:ro
+      - ./setup_shell.py:/app/setup_shell.py:ro
     environment:
       - PYTHONUNBUFFERED=1
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
@@ -33,4 +34,5 @@ services:
         cp -r /root/.sdkman /home/claudeuser/ 2>/dev/null || true
         cp -r /root/.claude /home/claudeuser/ 2>/dev/null || true
         chown -R 1000:1000 /home/claudeuser/.nvm /home/claudeuser/.sdkman /home/claudeuser/.claude /app/data /app/workspace /app/shared 2>/dev/null || true
+        python3 /app/setup_shell.py
         su - claudeuser -c 'export PATH=/home/claudeuser/.nvm/versions/node/v24.14.1/bin:/home/claudeuser/.sdkman/candidates/java/current/bin:/usr/local/bin:/usr/bin:/bin; export HOME=/home/claudeuser; cd /app && exec uvicorn ai_company.api.server:app --host 0.0.0.0 --port 8080'
