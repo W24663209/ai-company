@@ -11,7 +11,7 @@ services:
       - ./data:/app/data
       - ./workspace:/app/workspace
       - ./shared:/app/shared
-      - ./.claude:/root/.claude
+      - ./.claude:/home/claudeuser/.claude
       - ./ai_company:/app/ai_company:ro
       - ./frontend:/app/frontend:ro
     environment:
