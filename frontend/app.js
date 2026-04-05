@@ -201,6 +201,10 @@ function renderChatRow(reqId) {
             ${loadingBubble}
           </div>
           <div id="chat-files-${reqId}" class="chat-files-list" style="display:none;padding:8px 12px;background:#f8f9fa;border-top:1px solid var(--border);max-height:100px;overflow-y:auto;"></div>
+          <div class="ws-status" id="ws-status-${reqId}" style="display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px;color:#666;background:#f8f9fa;border-top:1px solid var(--border);">
+            <span class="ws-dot" id="ws-dot-${reqId}" style="width:8px;height:8px;border-radius:50%;background:#ccc;"></span>
+            <span class="ws-text" id="ws-text-${reqId}">未连接</span>
+          </div>
           <div class="chat-input-wrapper">
             <textarea id="chat-input-${reqId}" class="chat-input" placeholder="输入你要告诉 Claude 的内容，按 Enter 发送"></textarea>
             <input type="file" id="chat-file-${reqId}" style="display:none" onchange="handleChatFileSelect('${reqId}')" multiple>
@@ -262,13 +266,20 @@ function closeChat() {
   loadReqs();
 }
 
-function appendChatBubble(reqId, role, text) {
+function appendChatBubble(reqId, role, text, msgId = null) {
   const container = document.getElementById(`chat-history-${reqId}`);
   if (!container) return;
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${role === 'claude' ? 'claude' : 'user'}`;
+  bubble.id = msgId ? `msg-${msgId}` : '';
+
+  // Add resend button for user messages
+  const resendBtn = role !== 'claude' && msgId
+    ? `<button class="btn btn-ghost" onclick="resendChat('${reqId}', '${msgId}')" style="padding:2px 8px;font-size:12px;margin-left:8px" title="重新发送">🔄</button>`
+    : '';
+
   bubble.innerHTML = `
-    <div class="label">${role === 'claude' ? 'Claude' : '你'}</div>
+    <div class="label">${role === 'claude' ? 'Claude' : '你'}${resendBtn}</div>
     <div class="text">${escapeHtml(text)}</div>
   `;
   container.appendChild(bubble);
@@ -340,11 +351,14 @@ async function sendChat(reqId) {
   if (fileDescription) displayParts.push(`[文件: ${fileDescription}]`);
   const displayText = displayParts.join('\n') || '[空消息]';
 
-  chatHistories[reqId].push({ role: 'user', text: displayText, fullText: fullMessage });
+  // Generate unique message ID for resend functionality
+  const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+  chatHistories[reqId].push({ role: 'user', text: displayText, fullText: fullMessage, msgId: msgId });
   input.value = '';
   chatLoadingState[reqId] = true;
 
-  appendChatBubble(reqId, 'user', displayText);
+  appendChatBubble(reqId, 'user', displayText, msgId);
   appendLoadingIndicator(reqId);
   scrollChatToBottom(reqId);
   await saveWorklog(reqId);
@@ -352,165 +366,259 @@ async function sendChat(reqId) {
   setChatControlsEnabled(reqId, false);
 
   // Use WebSocket for long-running Claude tasks (like terminal)
+  // with automatic reconnection support
   let ws = null;
   let pingInterval = null;
   let connectionTimeout = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 10;
+  let isResolved = false;
 
-  try {
+  // Create streaming bubble (only once)
+  removeLoadingIndicator(reqId);
+  const claudeBubble = document.createElement('div');
+  claudeBubble.className = 'chat-bubble claude';
+  claudeBubble.textContent = '';
+  const container = document.getElementById(`chat-history-${reqId}`);
+  if (container) container.appendChild(claudeBubble);
+
+  let fullResponse = '';
+  let hasReceivedData = false;
+  let pendingUpdate = false;
+  let pendingScroll = false;
+
+  const updateUI = () => {
+    if (pendingUpdate) {
+      claudeBubble.textContent = fullResponse;
+      pendingUpdate = false;
+    }
+    if (pendingScroll) {
+      scrollChatToBottom(reqId);
+      pendingScroll = false;
+    }
+    if (chatLoadingState[reqId]) {
+      requestAnimationFrame(updateUI);
+    }
+  };
+  requestAnimationFrame(updateUI);
+
+  const connectWebSocket = () => new Promise((resolve, reject) => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/agents/ws/chat/${encodeURIComponent(currentProject.id)}/${encodeURIComponent(reqId)}`;
 
     ws = new WebSocket(wsUrl);
+    updateWsStatus(reqId, 'connecting');
 
     // Connection timeout
     connectionTimeout = setTimeout(() => {
       if (ws.readyState !== WebSocket.OPEN) {
         ws.close();
+        reject(new Error('Connection timeout'));
       }
     }, 10000);
 
-    await new Promise((resolve, reject) => {
-      ws.onopen = () => {
-        clearTimeout(connectionTimeout);
-        resolve();
-      };
-      ws.onerror = () => reject(new Error('WebSocket connection failed'));
-    });
+    ws.onopen = () => {
+      clearTimeout(connectionTimeout);
+      reconnectAttempts = 0; // Reset on successful connection
+      updateWsStatus(reqId, 'connected');
 
-    // Start keepalive ping every 25 seconds (less than 30s proxy timeout)
-    pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send('ping');
+      // Start keepalive ping every 25 seconds
+      pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send('ping');
+        }
+      }, 25000);
+
+      // Send message (with file contents if any)
+      ws.send(JSON.stringify({ message: fullMessage }));
+    };
+
+    ws.onmessage = (event) => {
+      // Handle ping/pong
+      if (event.data === 'ping') {
+        ws.send('pong');
+        return;
       }
-    }, 25000);
 
-    // Send message (with file contents if any)
-    ws.send(JSON.stringify({ message: fullMessage }));
-
-    // Create streaming bubble
-    removeLoadingIndicator(reqId);
-    const claudeBubble = document.createElement('div');
-    claudeBubble.className = 'chat-bubble claude';
-    claudeBubble.textContent = '';
-    const container = document.getElementById(`chat-history-${reqId}`);
-    if (container) container.appendChild(claudeBubble);
-
-    let fullResponse = '';
-    let hasReceivedData = false;
-
-    // Use requestAnimationFrame for smooth UI updates
-    let pendingUpdate = false;
-    let pendingScroll = false;
-
-    const updateUI = () => {
-      if (pendingUpdate) {
-        claudeBubble.textContent = fullResponse;
-        pendingUpdate = false;
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (e) {
+        return;
       }
-      if (pendingScroll) {
+
+      if (data.type === 'ping') {
+        return;
+      }
+
+      hasReceivedData = true;
+
+      if (data.type === 'partial') {
+        fullResponse += data.data;
+        pendingUpdate = true;
+        pendingScroll = true;
+      } else if (data.type === 'done') {
+        if (isResolved) return;
+        isResolved = true;
+        clearInterval(pingInterval);
+        claudeBubble.remove();
+        // Add token usage info if available
+        let displayText = fullResponse;
+        if (data.usage) {
+          const usage = data.usage;
+          const inputTokens = usage.input_tokens || 0;
+          const outputTokens = usage.output_tokens || 0;
+          const cacheTokens = usage.cache_read_tokens || 0;
+          const cost = usage.total_cost_usd || 0;
+          displayText += `\n\n---\n📊 Token消耗: 输入${inputTokens} / 输出${outputTokens} / 缓存${cacheTokens} | 💰 $${cost.toFixed(6)}`;
+        }
+        chatHistories[reqId].push({ role: 'claude', text: displayText });
+        chatLoadingState[reqId] = false;
+        appendChatBubble(reqId, 'claude', displayText);
         scrollChatToBottom(reqId);
-        pendingScroll = false;
-      }
-      if (chatLoadingState[reqId]) {
-        requestAnimationFrame(updateUI);
+        setChatControlsEnabled(reqId, true);
+        saveWorklog(reqId);
+        ws.close();
+        resolve();
+      } else if (data.type === 'error') {
+        if (isResolved) return;
+        isResolved = true;
+        clearInterval(pingInterval);
+        chatLoadingState[reqId] = false;
+        reject(new Error(data.message));
       }
     };
-    requestAnimationFrame(updateUI);
 
-    await new Promise((resolve, reject) => {
-      ws.onmessage = (event) => {
-        // Handle ping/pong
-        if (event.data === 'ping') {
-          ws.send('pong');
-          return;
-        }
+    ws.onerror = (err) => {
+      console.error('WebSocket error:', err);
+      clearInterval(pingInterval);
+      // Don't reject here, let onclose handle reconnection
+    };
 
-        let data;
-        try {
-          data = JSON.parse(event.data);
-        } catch (e) {
-          return;
-        }
+    ws.onclose = (event) => {
+      clearInterval(pingInterval);
+      if (isResolved || !chatLoadingState[reqId]) return;
 
-        if (data.type === 'ping') {
-          return;
-        }
-
-        hasReceivedData = true;
-
-        if (data.type === 'partial') {
-          fullResponse += data.data;
-          pendingUpdate = true;
-          pendingScroll = true;
-        } else if (data.type === 'done') {
-          claudeBubble.remove();
-          chatHistories[reqId].push({ role: 'claude', text: fullResponse });
-          chatLoadingState[reqId] = false;
-          appendChatBubble(reqId, 'claude', fullResponse);
-          scrollChatToBottom(reqId);
-          setChatControlsEnabled(reqId, true);
-          resolve();
-        } else if (data.type === 'error') {
-          chatLoadingState[reqId] = false;
-          reject(new Error(data.message));
-        }
-      };
-
-      ws.onerror = (err) => {
-        console.error('WebSocket error:', err);
-        reject(new Error('WebSocket connection error'));
-      };
-
-      ws.onclose = (event) => {
-        clearInterval(pingInterval);
-        if (chatLoadingState[reqId]) {
-          if (hasReceivedData && fullResponse) {
-            // Connection closed but we got data, treat as success
-            claudeBubble.remove();
-            chatHistories[reqId].push({ role: 'claude', text: fullResponse });
-            chatLoadingState[reqId] = false;
-            appendChatBubble(reqId, 'claude', fullResponse);
-            scrollChatToBottom(reqId);
-            setChatControlsEnabled(reqId, true);
-            resolve();
-          } else {
-            reject(new Error('WebSocket closed unexpectedly'));
+      if (hasReceivedData && fullResponse) {
+        // Connection closed but we got data, treat as success
+        isResolved = true;
+        claudeBubble.remove();
+        chatHistories[reqId].push({ role: 'claude', text: fullResponse });
+        chatLoadingState[reqId] = false;
+        appendChatBubble(reqId, 'claude', fullResponse);
+        scrollChatToBottom(reqId);
+        setChatControlsEnabled(reqId, true);
+        saveWorklog(reqId);
+        updateWsStatus(reqId, 'idle');
+        resolve();
+      } else if (reconnectAttempts < maxReconnectAttempts) {
+        // Try to reconnect with exponential backoff
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 5000);
+        console.log(`WebSocket closed, reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})...`);
+        updateWsStatus(reqId, 'reconnecting', reconnectAttempts);
+        claudeBubble.textContent = `[连接断开，${delay/1000}秒后尝试重连 (${reconnectAttempts}/${maxReconnectAttempts})...]`;
+        setTimeout(() => {
+          if (chatLoadingState[reqId]) {
+            connectWebSocket().then(resolve).catch(reject);
           }
-        }
-      };
-    });
+        }, delay);
+      } else {
+        // Max reconnection attempts reached, show manual reconnect button
+        isResolved = true;
+        chatLoadingState[reqId] = false;
+        updateWsStatus(reqId, 'disconnected');
+        // Store message for manual reconnect
+        window.pendingReconnect = { reqId, fullMessage };
+        claudeBubble.innerHTML = `
+          <div>[连接失败，已达到最大重试次数 (${maxReconnectAttempts}次)]</div>
+          <button class="btn btn-primary" id="reconnect-btn-${reqId}" onclick="manualReconnect()" style="margin-top:8px">
+            🔄 手动重连
+          </button>
+        `;
+        setChatControlsEnabled(reqId, true);
+        resolve();
+      }
+    };
+  });
 
-    clearInterval(pingInterval);
-    await saveWorklog(reqId);
-    ws.close();
+  try {
+    await connectWebSocket();
 
   } catch (e) {
     console.error('Chat error:', e);
     clearInterval(pingInterval);
     if (ws) ws.close();
 
-    // Fallback to HTTP API if WebSocket fails
+    // Fallback to HTTP streaming API if WebSocket fails
     try {
-      const res = await api('POST', `/agents/chat?project_id=${encodeURIComponent(currentProject.id)}&requirement_id=${encodeURIComponent(reqId)}`, {
-        message: text
+      const response = await fetch('/agents/chat?project_id=' + encodeURIComponent(currentProject.id) + '&requirement_id=' + encodeURIComponent(reqId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: fullMessage })
       });
+
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullResponse = '';
+
       removeLoadingIndicator(reqId);
-      chatHistories[reqId].push({ role: 'claude', text: res.response || '' });
+      const claudeBubble = document.createElement('div');
+      claudeBubble.className = 'chat-bubble claude';
+      claudeBubble.textContent = '';
+      const container = document.getElementById(`chat-history-${reqId}`);
+      if (container) container.appendChild(claudeBubble);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === 'stdout' && data.data) {
+                fullResponse += data.data;
+                claudeBubble.textContent = fullResponse;
+                scrollChatToBottom(reqId);
+              } else if (data.type === 'done') {
+                let displayText = fullResponse;
+                if (data.usage) {
+                  const usage = data.usage;
+                  displayText += `\n\n---\n📊 Token消耗: 输入${usage.input_tokens} / 输出${usage.output_tokens} / 缓存${usage.cache_read_tokens} | 💰 $${usage.total_cost_usd.toFixed(6)}`;
+                }
+                chatHistories[reqId].push({ role: 'claude', text: displayText });
+                claudeBubble.remove();
+                appendChatBubble(reqId, 'claude', displayText);
+                scrollChatToBottom(reqId);
+                saveWorklog(reqId);
+              }
+            } catch (e) {}
+          }
+        }
+      }
+
       chatLoadingState[reqId] = false;
-      appendChatBubble(reqId, 'claude', res.response || '');
-      scrollChatToBottom(reqId);
       setChatControlsEnabled(reqId, true);
-      await saveWorklog(reqId);
+
     } catch (httpError) {
-      const errorMsg = '出错了: ' + (e.message || '连接失败');
+      console.error('HTTP fallback error:', httpError);
+      updateWsStatus(reqId, 'disconnected');
+      const errorMsg = '出错了: ' + (httpError.message || '连接失败');
       chatHistories[reqId].push({ role: 'claude', text: errorMsg });
       chatLoadingState[reqId] = false;
       removeLoadingIndicator(reqId);
       appendChatBubble(reqId, 'claude', errorMsg);
       scrollChatToBottom(reqId);
       setChatControlsEnabled(reqId, true);
-      await saveWorklog(reqId);
-      toast('Claude 响应失败');
+      saveWorklog(reqId);
     }
   }
 }
@@ -545,6 +653,27 @@ function setChatControlsEnabled(reqId, enabled) {
     fileBtn.disabled = !enabled;
     fileBtn.style.opacity = enabled ? '1' : '0.5';
   }
+}
+
+// Update WebSocket connection status UI
+function updateWsStatus(reqId, status, reconnectAttempt = 0) {
+  const dot = document.getElementById(`ws-dot-${reqId}`);
+  const text = document.getElementById(`ws-text-${reqId}`);
+  if (!dot || !text) return;
+
+  const statusConfig = {
+    'connected': { color: '#16a34a', text: '已连接', bg: '#dcfce7' },
+    'connecting': { color: '#d97706', text: '连接中...', bg: '#fef3c7' },
+    'reconnecting': { color: '#ea580c', text: `重连中 (${reconnectAttempt}/10)...`, bg: '#ffedd5' },
+    'disconnected': { color: '#dc2626', text: '已断开', bg: '#fee2e2' },
+    'idle': { color: '#6b7280', text: '未连接', bg: 'transparent' }
+  };
+
+  const config = statusConfig[status] || statusConfig['idle'];
+  dot.style.background = config.color;
+  dot.style.boxShadow = `0 0 4px ${config.color}`;
+  text.textContent = config.text;
+  text.style.color = config.color;
 }
 
 // Handle file selection for chat
@@ -1747,5 +1876,351 @@ async function cloneProject() {
     loadProjects();
   } catch (e) {
     toast('拉取失败: ' + e.message);
+  }
+}
+
+// Resend a chat message by its ID
+async function resendChat(reqId, msgId) {
+  if (!currentProject || chatLoadingState[reqId]) return;
+
+  // Find the message in history
+  const history = chatHistories[reqId] || [];
+  const msgIndex = history.findIndex(m => m.msgId === msgId);
+  if (msgIndex === -1) return toast('找不到消息');
+
+  const msg = history[msgIndex];
+  if (!msg.fullText) return toast('无法重发此消息');
+
+  // Remove the original message bubble and all subsequent messages
+  const msgEl = document.getElementById(`msg-${msgId}`);
+  if (msgEl) {
+    let el = msgEl;
+    while (el) {
+      const nextEl = el.nextElementSibling;
+      el.remove();
+      el = nextEl;
+    }
+  }
+
+  // Remove from history
+  chatHistories[reqId] = history.slice(0, msgIndex);
+
+  // Re-append the message with new ID
+  const newMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  chatHistories[reqId].push({ role: 'user', text: msg.text, fullText: msg.fullText, msgId: newMsgId });
+
+  chatLoadingState[reqId] = true;
+  appendChatBubble(reqId, 'user', msg.text, newMsgId);
+  appendLoadingIndicator(reqId);
+  scrollChatToBottom(reqId);
+  await saveWorklog(reqId);
+  setChatControlsEnabled(reqId, false);
+
+  // WebSocket with auto-reconnect
+  let ws = null;
+  let pingInterval = null;
+  let connectionTimeout = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 10;
+  let isResolved = false;
+  let fullResponse = '';
+  let hasReceivedData = false;
+  let pendingUpdate = false;
+  let pendingScroll = false;
+
+  const connectWebSocket = () => new Promise((resolve, reject) => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/agents/ws/chat/${encodeURIComponent(currentProject.id)}/${encodeURIComponent(reqId)}`;
+
+    ws = new WebSocket(wsUrl);
+    updateWsStatus(reqId, 'connecting');
+
+    connectionTimeout = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        ws.close();
+        reject(new Error('Connection timeout'));
+      }
+    }, 10000);
+
+    ws.onopen = () => {
+      clearTimeout(connectionTimeout);
+      reconnectAttempts = 0;
+      updateWsStatus(reqId, 'connected');
+      pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      }, 25000);
+      ws.send(JSON.stringify({ message: msg.fullText }));
+    };
+
+    ws.onmessage = (event) => {
+      let data;
+      try { data = JSON.parse(event.data); } catch (e) { return; }
+      if (data.type === 'ping') return;
+      hasReceivedData = true;
+
+      if (data.type === 'partial') {
+        fullResponse += data.data;
+        pendingUpdate = true;
+        pendingScroll = true;
+      } else if (data.type === 'done') {
+        if (isResolved) return;
+        isResolved = true;
+        clearInterval(pingInterval);
+        removeLoadingIndicator(reqId);
+        let displayText = fullResponse;
+        if (data.usage) {
+          const usage = data.usage;
+          displayText += `\n\n---\n📊 Token消耗: 输入${usage.input_tokens} / 输出${usage.output_tokens} / 缓存${usage.cache_read_tokens} | 💰 $${usage.total_cost_usd.toFixed(6)}`;
+        }
+        chatHistories[reqId].push({ role: 'claude', text: displayText });
+        appendChatBubble(reqId, 'claude', displayText);
+        scrollChatToBottom(reqId);
+        saveWorklog(reqId);
+        setChatControlsEnabled(reqId, true);
+        ws.close();
+        resolve();
+      } else if (data.type === 'error') {
+        if (isResolved) return;
+        isResolved = true;
+        clearInterval(pingInterval);
+        chatLoadingState[reqId] = false;
+        removeLoadingIndicator(reqId);
+        const errorMsg = `[错误: ${data.message || 'Unknown error'}]`;
+        chatHistories[reqId].push({ role: 'claude', text: errorMsg });
+        appendChatBubble(reqId, 'claude', errorMsg);
+        scrollChatToBottom(reqId);
+        saveWorklog(reqId);
+        setChatControlsEnabled(reqId, true);
+        ws.close();
+      }
+    };
+
+    ws.onclose = () => {
+      clearInterval(pingInterval);
+      if (isResolved || !chatLoadingState[reqId]) return;
+
+      if (hasReceivedData && fullResponse) {
+        isResolved = true;
+        removeLoadingIndicator(reqId);
+        chatHistories[reqId].push({ role: 'claude', text: fullResponse });
+        chatLoadingState[reqId] = false;
+        appendChatBubble(reqId, 'claude', fullResponse);
+        scrollChatToBottom(reqId);
+        saveWorklog(reqId);
+        updateWsStatus(reqId, 'idle');
+        setChatControlsEnabled(reqId, true);
+        resolve();
+      } else if (reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 5000);
+        updateWsStatus(reqId, 'reconnecting', reconnectAttempts);
+        const loadingEl = document.getElementById(`chat-loading-${reqId}`);
+        if (loadingEl) {
+          const textEl = loadingEl.querySelector('.text');
+          if (textEl) textEl.textContent = `[连接断开，${delay/1000}秒后尝试重连 (${reconnectAttempts}/${maxReconnectAttempts})...]`;
+        }
+        setTimeout(() => {
+          if (chatLoadingState[reqId]) {
+            connectWebSocket().then(resolve).catch(reject);
+          }
+        }, delay);
+      } else {
+        isResolved = true;
+        chatLoadingState[reqId] = false;
+        updateWsStatus(reqId, 'disconnected');
+        removeLoadingIndicator(reqId);
+        window.pendingReconnect = { reqId, fullMessage: msg.fullText };
+        const errorMsg = `[连接失败，已达到最大重试次数 (${maxReconnectAttempts}次)]`;
+        const bubbleHtml = errorMsg + '\n\n<button class="btn btn-primary" onclick="manualReconnect()" style="margin-top:8px">🔄 手动重连</button>';
+        chatHistories[reqId].push({ role: 'claude', text: errorMsg });
+        appendChatBubble(reqId, 'claude', bubbleHtml);
+        scrollChatToBottom(reqId);
+        saveWorklog(reqId);
+        setChatControlsEnabled(reqId, true);
+        resolve();
+      }
+    };
+
+    ws.onerror = () => {
+      clearInterval(pingInterval);
+    };
+  });
+
+  try {
+    await connectWebSocket();
+  } catch (e) {
+    if (!isResolved) {
+      isResolved = true;
+      removeLoadingIndicator(reqId);
+      const errorMsg = `[错误: ${e.message}]`;
+      chatHistories[reqId].push({ role: 'claude', text: errorMsg });
+      chatLoadingState[reqId] = false;
+      appendChatBubble(reqId, 'claude', errorMsg);
+      scrollChatToBottom(reqId);
+      saveWorklog(reqId);
+      setChatControlsEnabled(reqId, true);
+    }
+  }
+}
+
+// Manual reconnect function
+async function manualReconnect() {
+  const pending = window.pendingReconnect;
+  if (!pending) return toast('没有待重连的消息');
+
+  const { reqId, fullMessage } = pending;
+  if (!currentProject || chatLoadingState[reqId]) return;
+
+  // Find the error message with reconnect button and remove it
+  const history = chatHistories[reqId] || [];
+  const lastIdx = history.length - 1;
+  if (lastIdx >= 0 && history[lastIdx].role === 'claude' && history[lastIdx].text.includes('连接失败')) {
+    chatHistories[reqId] = history.slice(0, lastIdx);
+    // Remove the last bubble from DOM
+    const container = document.getElementById(`chat-history-${reqId}`);
+    if (container && container.lastElementChild) {
+      container.lastElementChild.remove();
+    }
+  }
+
+  chatLoadingState[reqId] = true;
+  appendLoadingIndicator(reqId);
+  scrollChatToBottom(reqId);
+  setChatControlsEnabled(reqId, false);
+
+  // Try WebSocket connection again
+  let ws = null;
+  let pingInterval = null;
+  let connectionTimeout = null;
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 10;
+  let isResolved = false;
+  let fullResponse = '';
+  let hasReceivedData = false;
+
+  const connectWebSocket = () => new Promise((resolve, reject) => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/agents/ws/chat/${encodeURIComponent(currentProject.id)}/${encodeURIComponent(reqId)}`;
+
+    ws = new WebSocket(wsUrl);
+    updateWsStatus(reqId, 'connecting');
+
+    connectionTimeout = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        ws.close();
+        reject(new Error('Connection timeout'));
+      }
+    }, 10000);
+
+    ws.onopen = () => {
+      clearTimeout(connectionTimeout);
+      reconnectAttempts = 0;
+      updateWsStatus(reqId, 'connected');
+      pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+      }, 25000);
+      ws.send(JSON.stringify({ message: fullMessage }));
+    };
+
+    ws.onmessage = (event) => {
+      let data;
+      try { data = JSON.parse(event.data); } catch (e) { return; }
+      if (data.type === 'ping') return;
+      hasReceivedData = true;
+
+      if (data.type === 'partial') {
+        fullResponse += data.data;
+      } else if (data.type === 'done') {
+        if (isResolved) return;
+        isResolved = true;
+        clearInterval(pingInterval);
+        removeLoadingIndicator(reqId);
+        let displayText = fullResponse;
+        if (data.usage) {
+          const usage = data.usage;
+          displayText += `\n\n---\n📊 Token消耗: 输入${usage.input_tokens} / 输出${usage.output_tokens} / 缓存${usage.cache_read_tokens} | 💰 $${usage.total_cost_usd.toFixed(6)}`;
+        }
+        chatHistories[reqId].push({ role: 'claude', text: displayText });
+        appendChatBubble(reqId, 'claude', displayText);
+        scrollChatToBottom(reqId);
+        saveWorklog(reqId);
+        setChatControlsEnabled(reqId, true);
+        ws.close();
+        resolve();
+      } else if (data.type === 'error') {
+        if (isResolved) return;
+        isResolved = true;
+        clearInterval(pingInterval);
+        chatLoadingState[reqId] = false;
+        removeLoadingIndicator(reqId);
+        const errorMsg = `[错误: ${data.message}]`;
+        chatHistories[reqId].push({ role: 'claude', text: errorMsg });
+        appendChatBubble(reqId, 'claude', errorMsg);
+        scrollChatToBottom(reqId);
+        saveWorklog(reqId);
+        setChatControlsEnabled(reqId, true);
+        ws.close();
+      }
+    };
+
+    ws.onclose = () => {
+      clearInterval(pingInterval);
+      if (isResolved || !chatLoadingState[reqId]) return;
+
+      if (hasReceivedData && fullResponse) {
+        isResolved = true;
+        removeLoadingIndicator(reqId);
+        chatHistories[reqId].push({ role: 'claude', text: fullResponse });
+        chatLoadingState[reqId] = false;
+        appendChatBubble(reqId, 'claude', fullResponse);
+        scrollChatToBottom(reqId);
+        saveWorklog(reqId);
+        updateWsStatus(reqId, 'idle');
+        setChatControlsEnabled(reqId, true);
+        resolve();
+      } else if (reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 5000);
+        updateWsStatus(reqId, 'reconnecting', reconnectAttempts);
+        setTimeout(() => {
+          if (chatLoadingState[reqId]) {
+            connectWebSocket().then(resolve).catch(reject);
+          }
+        }, delay);
+      } else {
+        isResolved = true;
+        chatLoadingState[reqId] = false;
+        updateWsStatus(reqId, 'disconnected');
+        removeLoadingIndicator(reqId);
+        const errorMsg = `[连接失败，已达到最大重试次数 (${maxReconnectAttempts}次)]`;
+        const bubbleHtml = errorMsg + '\n\n<button class="btn btn-primary" onclick="manualReconnect()" style="margin-top:8px">🔄 手动重连</button>';
+        chatHistories[reqId].push({ role: 'claude', text: errorMsg });
+        appendChatBubble(reqId, 'claude', bubbleHtml);
+        scrollChatToBottom(reqId);
+        saveWorklog(reqId);
+        setChatControlsEnabled(reqId, true);
+        resolve();
+      }
+    };
+
+    ws.onerror = () => {
+      clearInterval(pingInterval);
+    };
+  });
+
+  try {
+    await connectWebSocket();
+  } catch (e) {
+    if (!isResolved) {
+      isResolved = true;
+      removeLoadingIndicator(reqId);
+      const errorMsg = `[错误: ${e.message}]`;
+      chatHistories[reqId].push({ role: 'claude', text: errorMsg });
+      chatLoadingState[reqId] = false;
+      appendChatBubble(reqId, 'claude', errorMsg);
+      scrollChatToBottom(reqId);
+      saveWorklog(reqId);
+      setChatControlsEnabled(reqId, true);
+    }
   }
 }

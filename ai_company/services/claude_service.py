@@ -195,12 +195,20 @@ def _run_claude_streaming(
     cwd: str,
     env: dict[str, str],
 ):
-    """Run Claude with streaming output for long-running tasks."""
+    """Run Claude with streaming output for long-running tasks, using JSON format for token tracking."""
     import select
     import fcntl
 
+    # Change to JSON output format to get token usage
+    json_cmd = claude_cmd.copy()
+    if "--output-format" in json_cmd:
+        idx = json_cmd.index("--output-format")
+        json_cmd[idx + 1] = "json"
+    else:
+        json_cmd.extend(["--output-format", "json"])
+
     process = subprocess.Popen(
-        claude_cmd,
+        json_cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -224,6 +232,7 @@ def _run_claude_streaming(
 
     stdout_chunks = []
     stderr_chunks = []
+    json_output = ""
 
     while True:
         reads = [process.stdout, process.stderr]
@@ -235,7 +244,14 @@ def _run_claude_streaming(
                 if data:
                     if fd is process.stdout:
                         stdout_chunks.append(data)
-                        yield {"type": "stdout", "data": data}
+                        json_output += data
+                        # Try to extract partial result for streaming
+                        try:
+                            partial_json = json.loads(json_output)
+                            if "result" in partial_json:
+                                yield {"type": "stdout", "data": partial_json["result"]}
+                        except:
+                            pass
                     else:
                         stderr_chunks.append(data)
                         yield {"type": "stderr", "data": data}
@@ -251,7 +267,7 @@ def _run_claude_streaming(
                         if data:
                             if fd is process.stdout:
                                 stdout_chunks.append(data)
-                                yield {"type": "stdout", "data": data}
+                                json_output += data
                             else:
                                 stderr_chunks.append(data)
                                 yield {"type": "stderr", "data": data}
@@ -259,11 +275,43 @@ def _run_claude_streaming(
                         pass
             break
 
+    # Parse final JSON output for result and token usage
+    result_text = "".join(stdout_chunks)
+    usage_info = None
+
+    try:
+        final_json = json.loads(json_output)
+        if "result" in final_json:
+            result_text = final_json["result"]
+        # Extract usage info
+        if "usage" in final_json:
+            usage = final_json["usage"]
+            usage_info = {
+                "input_tokens": usage.get("input_tokens", 0),
+                "output_tokens": usage.get("output_tokens", 0),
+                "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+                "total_cost_usd": final_json.get("total_cost_usd", 0),
+            }
+        elif "modelUsage" in final_json:
+            # Fallback to modelUsage
+            for model, usage in final_json["modelUsage"].items():
+                usage_info = {
+                    "input_tokens": usage.get("inputTokens", 0),
+                    "output_tokens": usage.get("outputTokens", 0),
+                    "cache_read_tokens": usage.get("cacheReadInputTokens", 0),
+                    "total_cost_usd": usage.get("costUSD", 0),
+                }
+                break
+    except json.JSONDecodeError:
+        # If JSON parsing fails, use raw output
+        pass
+
     yield {
         "type": "done",
-        "stdout": "".join(stdout_chunks),
+        "stdout": result_text,
         "stderr": "".join(stderr_chunks),
         "returncode": process.returncode,
+        "usage": usage_info,
     }
 
 
@@ -425,14 +473,17 @@ async def chat_stream(
         return cmd
 
     # Remove lock to allow concurrent requests - each session is independent
+    last_chunk = None
+
     if existing_session:
         cmd = make_cmd(existing_session, is_resume=True)
         async for chunk in _async_stream_claude(cmd, message, cwd, env):
+            last_chunk = chunk
             yield chunk
 
         # Check if we need to restart session
-        if chunk.get("returncode", 0) != 0:
-            err = chunk.get("stderr", "")
+        if last_chunk and last_chunk.get("returncode", 0) != 0:
+            err = last_chunk.get("stderr", "")
             if "No conversation found" in err or "not found" in err:
                 existing_session = None
                 _clear_session(project_id, requirement_id)
@@ -442,11 +493,13 @@ async def chat_stream(
         prompt = _build_system_prompt(project_id, requirement_id) + f"\n[USER]\n{message}\n"
         cmd = make_cmd(new_session, is_resume=False)
 
+        last_chunk = None
         async for chunk in _async_stream_claude(cmd, prompt, cwd, env):
+            last_chunk = chunk
             yield chunk
 
-        if chunk.get("returncode") == 0:
+        if last_chunk and last_chunk.get("returncode") == 0:
             _save_session(project_id, requirement_id, new_session)
-        else:
-            clean_stderr = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", chunk.get("stderr", ""))
+        elif last_chunk:
+            clean_stderr = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", last_chunk.get("stderr", ""))
             raise AICompanyError(clean_stderr or "Claude exited with an error")

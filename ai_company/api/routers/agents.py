@@ -21,23 +21,13 @@ def run_agent(project_id: str, requirement_id: str, working_dir: str | None = No
 
 
 @router.post("/chat")
-def chat(project_id: str, requirement_id: str, payload: dict):
-    try:
-        message = payload.get("message", "")
-        result = claude_service.chat(project_id, requirement_id, message)
-        return {"response": result["stdout"]}
-    except AICompanyError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@router.post("/chat/stream")
-def chat_stream(project_id: str, requirement_id: str, payload: dict):
-    """Stream Claude responses to prevent gateway timeout."""
+async def chat(project_id: str, requirement_id: str, payload: dict):
+    """Stream Claude responses via HTTP to prevent gateway timeout."""
     try:
         message = payload.get("message", "")
 
-        def event_generator():
-            for chunk in claude_service.chat_stream(project_id, requirement_id, message):
+        async def event_generator():
+            async for chunk in claude_service.chat_stream(project_id, requirement_id, message):
                 if chunk["type"] in ("stdout", "stderr"):
                     yield f"data: {json.dumps(chunk)}\n\n"
                 elif chunk["type"] == "done":
@@ -49,7 +39,33 @@ def chat_stream(project_id: str, requirement_id: str, payload: dict):
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "X-Accel-Buffering": "no",
+            }
+        )
+    except AICompanyError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/chat/stream")
+async def chat_stream(project_id: str, requirement_id: str, payload: dict):
+    """Stream Claude responses to prevent gateway timeout."""
+    try:
+        message = payload.get("message", "")
+
+        async def event_generator():
+            async for chunk in claude_service.chat_stream(project_id, requirement_id, message):
+                if chunk["type"] in ("stdout", "stderr"):
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                elif chunk["type"] == "done":
+                    yield f"data: {json.dumps(chunk)}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
             }
         )
     except AICompanyError as exc:
@@ -152,7 +168,7 @@ async def chat_ws(websocket: WebSocket, project_id: str, requirement_id: str):
                 # Process with Claude using streaming
                 try:
                     full_response = ""
-                    for chunk in claude_service.chat_stream(project_id, requirement_id, message):
+                    async for chunk in claude_service.chat_stream(project_id, requirement_id, message):
                         if not is_connected:
                             break
                         if chunk["type"] == "stdout":
@@ -168,10 +184,12 @@ async def chat_ws(websocket: WebSocket, project_id: str, requirement_id: str):
                                 "data": chunk.get("data", "")
                             })
                         elif chunk["type"] == "done":
+                            usage_info = chunk.get("usage")
                             await websocket.send_json({
                                 "type": "done",
                                 "response": full_response,
-                                "returncode": chunk.get("returncode", 0)
+                                "returncode": chunk.get("returncode", 0),
+                                "usage": usage_info,
                             })
 
                 except Exception as e:
