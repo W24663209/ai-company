@@ -252,6 +252,8 @@ async function toggleChat(reqId) {
   setTimeout(() => {
     const el = document.getElementById(`chat-input-${reqId}`);
     if (el) el.focus();
+    // Auto scroll to bottom (latest message)
+    scrollChatToBottom(reqId);
   }, 50);
 }
 
