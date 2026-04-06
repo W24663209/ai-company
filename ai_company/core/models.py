@@ -83,3 +83,70 @@ class AgentPresence(BaseModel):
     project_id: str = ""
     status: Literal["idle", "working", "done", "error"] = "idle"
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Skill(BaseModel):
+    """Skill/prompt template for AI agents"""
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    name: str
+    description: str = ""
+    content: str  # The actual skill content/prompt
+    category: str = "general"  # e.g., "coding", "debugging", "analysis", "general"
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProjectSkillBinding(BaseModel):
+    """Many-to-many relationship between Project and Skill"""
+    model_config = ConfigDict(extra="ignore")
+
+    project_id: str
+    skill_id: str
+    enabled: bool = True
+    priority: int = 5  # 1-10, higher means more important
+    added_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProjectLinkType(str, Enum):
+    DEPENDS_ON = "depends_on"  # 依赖于
+    DEPENDENCY_OF = "dependency_of"  # 被依赖
+    RELATED = "related"  # 相关
+    PARENT = "parent"  # 父项目
+    CHILD = "child"  # 子项目
+    COLLABORATES = "collaborates"  # 协作
+
+
+class ProjectLink(BaseModel):
+    """Link between projects for collaboration"""
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    source_project_id: str  # 源项目
+    target_project_id: str  # 目标项目
+    link_type: ProjectLinkType
+    description: str = ""  # 链接描述
+    auto_route_messages: bool = True  # 是否自动路由消息
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CrossProjectMessage(BaseModel):
+    """Message that can be routed between linked projects"""
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    source_project_id: str
+    source_requirement_id: str = ""  # 可选：关联的需求
+    target_project_id: str
+    target_requirement_id: str = ""  # 可选：目标需求
+    sender: str  # 发送者标识
+    message_type: Literal["request", "response", "notify", "delegate", "question"]
+    subject: str  # 消息主题
+    content: str  # 消息内容
+    context: dict[str, Any] = Field(default_factory=dict)  # 上下文数据
+    status: Literal["pending", "delivered", "read", "processing", "completed", "failed"] = "pending"
+    reply_to: str = ""  # 回复哪条消息
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

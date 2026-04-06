@@ -35,7 +35,7 @@
       line-height: 1.6;
       min-height: 100vh;
     }
-    .container { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+    .container { max-width: 1920px; margin: 0 auto; padding: 32px 24px; }
     header {
       display: flex;
       align-items: center;
@@ -61,10 +61,10 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      width: min(560px, 92vw);
-      max-height: 80vh;
+      width: min(900px, 95vw);
+      max-height: 90vh;
       overflow: auto;
-      padding: 24px;
+      padding: 28px;
       box-shadow: var(--shadow);
     }
     .modal-header {
@@ -209,7 +209,7 @@
       font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
       font-size: 13px;
       white-space: pre-wrap;
-      max-height: 300px;
+      max-height: 700px;
       overflow: auto;
       border: 1px solid var(--border);
     }
@@ -266,7 +266,7 @@
     }
     .chat-header strong { font-size: 15px; color: var(--text); }
     .chat-messages {
-      max-height: 400px;
+      max-height: 800px;
       overflow-y: auto;
       margin-bottom: 16px;
       padding-right: 8px;
@@ -421,6 +421,7 @@
         <button class="tab-btn" onclick="showProjectTab('files')">文件</button>
         <button class="tab-btn" onclick="showProjectTab('shared')">共享</button>
         <button class="tab-btn" onclick="showProjectTab('terminal')">终端</button>
+        <button class="tab-btn" onclick="showProjectNetworkModal()">协作</button>
         <button class="tab-btn" onclick="showProjectTab('settings')">设置</button>
       </div>
 
@@ -481,7 +482,7 @@
       </div>
 
       <div id="panel-files" class="panel hidden">
-        <div class="card" style="display:flex;gap:16px;height:640px;padding:16px">
+        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px">
           <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
             <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
               <strong style="font-size:14px">文件浏览</strong>
@@ -503,7 +504,7 @@
       </div>
 
       <div id="panel-shared" class="panel hidden">
-        <div class="card" style="display:flex;gap:16px;height:640px;padding:16px">
+        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px">
           <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
             <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
               <strong style="font-size:14px">共享目录</strong>
@@ -536,7 +537,7 @@
             <button class="btn btn-secondary" onclick="addTerminalScript()">添加</button>
           </div>
         </div>
-        <div class="card" id="terminal-card" style="padding:0;overflow:hidden;height:520px;display:flex;flex-direction:column;">
+        <div class="card" id="terminal-card" style="padding:0;overflow:hidden;height:780px;display:flex;flex-direction:column;">
           <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
             <strong>交互式终端</strong>
             <div class="form-row" style="gap:8px;">
@@ -563,22 +564,32 @@
         <div class="card">
           <h3>项目记忆</h3>
           <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">Claude 在处理需求时会自动读取这些上下文，帮助保持跨对话的一致性。</p>
-          <textarea id="proj-memory" placeholder="记录项目关键上下文、历史决策、约束条件等..." style="width:100%;min-height:120px"></textarea>
+          <textarea id="proj-memory" placeholder="记录项目关键上下文、历史决策、约束条件等..." style="width:100%;min-height:200px"></textarea>
         </div>
         <div class="card">
           <h3>智能体工作职责</h3>
           <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">定义参与该项目的智能体角色、分工和行为准则。</p>
-          <textarea id="proj-roles" placeholder="例如：前端智能体负责 React 组件开发，后端智能体负责 API 实现..." style="width:100%;min-height:120px"></textarea>
+          <textarea id="proj-roles" placeholder="例如：前端智能体负责 React 组件开发，后端智能体负责 API 实现..." style="width:100%;min-height:200px"></textarea>
         </div>
         <div class="card">
           <h3>环境变量</h3>
           <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">在构建和终端中自动注入的环境变量。每行一个，格式 KEY=VALUE。</p>
-          <textarea id="proj-env" placeholder="例如：\nNODE_ENV=production\nAPI_BASE_URL=https://api.example.com" style="width:100%;min-height:120px;font-family:monospace"></textarea>
+          <textarea id="proj-env" placeholder="例如：\nNODE_ENV=production\nAPI_BASE_URL=https://api.example.com" style="width:100%;min-height:160px;font-family:monospace"></textarea>
         </div>
         <div class="card">
           <h3>Claude Code Settings</h3>
           <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">为该项目配置 Claude Code CLI 的 settings.json。调用 Claude 时会自动通过 --settings 加载。</p>
-          <textarea id="proj-claude-settings" placeholder='例如：\n{\n  "allowedTools": ["Read", "Edit", "Bash"],\n  "model": "claude-sonnet-4-6"\n}' style="width:100%;min-height:160px;font-family:monospace"></textarea>
+          <textarea id="proj-claude-settings" placeholder='例如：\n{\n  "allowedTools": ["Read", "Edit", "Bash"],\n  "model": "claude-sonnet-4-6"\n}' style="width:100%;min-height:280px;font-family:monospace"></textarea>
+        </div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h3 style="margin:0">项目技能绑定</h3>
+            <button class="btn btn-secondary" onclick="showSkillsManager()">管理技能库</button>
+          </div>
+          <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">为该项目绑定技能，Claude 在处理需求时会自动应用这些技能。</p>
+          <div id="project-skills-list" style="margin-top:10px">
+            <p class="meta" style="font-size:13px">加载中...</p>
+          </div>
         </div>
         <div class="form-row" style="justify-content:flex-end">
           <button class="btn btn-primary" onclick="saveProjectSettings()">保存设置</button>
@@ -592,7 +603,7 @@
 
   <!-- SSH Modal -->
   <div id="ssh-modal" class="modal-overlay" onclick="if(event.target===this)closeSshModal()">
-    <div class="modal">
+    <div class="modal" style="max-width:900px">
       <div class="modal-header">
         <h3 style="margin:0">SSH 密钥管理</h3>
         <button class="btn btn-ghost" onclick="closeSshModal()" style="padding:4px 10px">关闭</button>
@@ -615,6 +626,218 @@
         <input id="ssh-key-name" placeholder="密钥名称 (如: github-ai-company)" style="flex:1;min-width:160px">
         <input id="ssh-key-email" placeholder="邮箱 (可选)" style="flex:1;min-width:160px">
         <button class="btn btn-primary" onclick="generateSshKey()">生成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skills Manager Modal -->
+  <div id="skills-modal" class="modal-overlay" onclick="if(event.target===this)closeSkillsModal()">
+    <div class="modal" style="max-width:1200px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <h3 style="margin:0">技能库管理</h3>
+        <button class="btn btn-ghost" onclick="closeSkillsModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px;border-bottom:1px solid var(--border)">
+        <div class="form-row">
+          <input id="skill-search" placeholder="搜索技能..." style="flex:1" oninput="filterSkills()">
+          <select id="skill-category-filter" onchange="filterSkills()" style="width:150px">
+            <option value="">所有分类</option>
+            <option value="coding">编码</option>
+            <option value="debugging">调试</option>
+            <option value="analysis">分析</option>
+            <option value="general">通用</option>
+          </select>
+          <button class="btn btn-primary" onclick="showCreateSkillForm()">+ 新建技能</button>
+        </div>
+      </div>
+      <div id="skills-list" style="flex:1;overflow-y:auto;padding:16px">
+        <p class="meta">加载中...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create/Edit Skill Modal -->
+  <div id="skill-form-modal" class="modal-overlay" onclick="if(event.target===this)closeSkillFormModal()">
+    <div class="modal" style="max-width:1000px;max-height:92vh;overflow-y:auto">
+      <div class="modal-header">
+        <h3 id="skill-form-title" style="margin:0">新建技能</h3>
+        <button class="btn btn-ghost" onclick="closeSkillFormModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px">
+        <input type="hidden" id="skill-id">
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">技能名称</label>
+          <input id="skill-name" placeholder="例如: React 组件开发专家">
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">分类</label>
+          <select id="skill-category">
+            <option value="coding">编码</option>
+            <option value="debugging">调试</option>
+            <option value="analysis">分析</option>
+            <option value="general">通用</option>
+          </select>
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">标签 (逗号分隔)</label>
+          <input id="skill-tags" placeholder="例如: react, frontend, component">
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">描述</label>
+          <input id="skill-description" placeholder="简短描述这个技能的作用">
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">技能内容 (Prompt)</label>
+          <textarea id="skill-content" placeholder="详细描述这个技能的行为准则、最佳实践、检查清单等..." style="min-height:450px;font-family:monospace;font-size:13px"></textarea>
+        </div>
+        <div class="form-row" style="justify-content:flex-end;gap:8px">
+          <button class="btn btn-danger" id="skill-delete-btn" onclick="deleteSkill()" style="display:none;margin-right:auto">删除</button>
+          <button class="btn btn-ghost" onclick="closeSkillFormModal()">取消</button>
+          <button class="btn btn-primary" onclick="saveSkill()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Project Links & Network Modal -->
+  <div id="project-network-modal" class="modal-overlay" onclick="if(event.target===this)closeProjectNetworkModal()">
+    <div class="modal" style="max-width:1200px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <h3 style="margin:0">项目协作网络</h3>
+        <button class="btn btn-ghost" onclick="closeProjectNetworkModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px;border-bottom:1px solid var(--border);display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <div id="network-visualization" style="flex:1;height:400px;background:var(--bg);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center">
+          <p class="meta">项目关系图可视化区域</p>
+        </div>
+        <div style="width:320px;min-width:320px;display:flex;flex-direction:column;gap:12px">
+          <h4 style="margin:0">当前项目链接</h4>
+          <div id="project-links-list" style="flex:1;overflow-y:auto;max-height:320px">
+            <p class="meta" style="font-size:13px">加载中...</p>
+          </div>
+          <button class="btn btn-primary" onclick="showCreateLinkForm()">+ 创建新链接</button>
+        </div>
+      </div>
+      <div style="padding:16px;flex:1;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h4 style="margin:0">跨项目消息</h4>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="showInbox()">收件箱</button>
+            <button class="btn btn-ghost" onclick="showOutbox()">发件箱</button>
+            <button class="btn btn-primary" onclick="showCreateMessageForm()">+ 发送消息</button>
+          </div>
+        </div>
+        <div id="cross-project-messages" style="display:flex;flex-direction:column;gap:8px">
+          <p class="meta" style="font-size:13px">选择一个项目查看消息</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Link Modal -->
+  <div id="create-link-modal" class="modal-overlay" onclick="if(event.target===this)closeCreateLinkModal()">
+    <div class="modal" style="max-width:600px">
+      <div class="modal-header">
+        <h3 style="margin:0">创建项目链接</h3>
+        <button class="btn btn-ghost" onclick="closeCreateLinkModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px">
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">目标项目</label>
+          <select id="link-target-project" style="width:100%">
+            <option value="">选择项目...</option>
+          </select>
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">链接类型</label>
+          <select id="link-type" style="width:100%">
+            <option value="related">相关项目</option>
+            <option value="depends_on">依赖于 (我依赖它)</option>
+            <option value="dependency_of">被依赖 (它依赖我)</option>
+            <option value="parent">父项目</option>
+            <option value="child">子项目</option>
+            <option value="collaborates">协作关系</option>
+          </select>
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">描述</label>
+          <input id="link-description" placeholder="描述这个链接的用途..." style="width:100%">
+        </div>
+        <div class="form-row" style="align-items:center;gap:8px;margin-bottom:16px">
+          <input type="checkbox" id="link-auto-route" checked style="width:16px;height:16px">
+          <label for="link-auto-route" style="font-size:13px">自动路由消息到链接项目</label>
+        </div>
+        <div class="form-row" style="justify-content:flex-end;gap:8px">
+          <button class="btn btn-ghost" onclick="closeCreateLinkModal()">取消</button>
+          <button class="btn btn-primary" onclick="createProjectLink()">创建链接</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Message Modal -->
+  <div id="create-message-modal" class="modal-overlay" onclick="if(event.target===this)closeCreateMessageModal()">
+    <div class="modal" style="max-width:800px">
+      <div class="modal-header">
+        <h3 style="margin:0">发送跨项目消息</h3>
+        <button class="btn btn-ghost" onclick="closeCreateMessageModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px">
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">目标项目</label>
+          <select id="message-target-project" style="width:100%" onchange="loadTargetProjectRequirements()">
+            <option value="">选择项目...</option>
+          </select>
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">目标需求 (可选)</label>
+          <select id="message-target-requirement" style="width:100%">
+            <option value="">不关联特定需求</option>
+          </select>
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">消息类型</label>
+          <select id="message-type" style="width:100%">
+            <option value="request">请求帮助</option>
+            <option value="delegate">委派任务</option>
+            <option value="question">询问问题</option>
+            <option value="notify">通知信息</option>
+          </select>
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">主题</label>
+          <input id="message-subject" placeholder="消息主题..." style="width:100%">
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">内容</label>
+          <textarea id="message-content" placeholder="详细描述你的请求或问题..." style="width:100%;min-height:200px;font-family:monospace"></textarea>
+        </div>
+        <div class="form-row" style="justify-content:flex-end;gap:8px">
+          <button class="btn btn-ghost" onclick="closeCreateMessageModal()">取消</button>
+          <button class="btn btn-primary" onclick="sendCrossProjectMessage()">发送消息</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Message Detail Modal -->
+  <div id="message-detail-modal" class="modal-overlay" onclick="if(event.target===this)closeMessageDetailModal()">
+    <div class="modal" style="max-width:700px">
+      <div class="modal-header">
+        <h3 style="margin:0" id="message-detail-subject">消息详情</h3>
+        <button class="btn btn-ghost" onclick="closeMessageDetailModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px">
+        <div id="message-detail-content" style="margin-bottom:16px">
+          <!-- Message content will be rendered here -->
+        </div>
+        <div id="message-reply-section" style="border-top:1px solid var(--border);padding-top:16px">
+          <h4 style="margin:0 0 12px 0">回复</h4>
+          <textarea id="message-reply-content" placeholder="输入回复内容..." style="width:100%;min-height:120px;margin-bottom:12px;font-family:monospace"></textarea>
+          <div class="form-row" style="justify-content:flex-end">
+            <button class="btn btn-primary" onclick="replyToMessage()">发送回复</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

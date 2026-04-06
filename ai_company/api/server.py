@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from ai_company.api.routers import agents, builds, files, git, projects, requirements, terminal
+from ai_company.api.routers import agents, builds, files, git, project_links, projects, requirements, skills, terminal
 from ai_company.core.config import settings
 
 create_app = None
@@ -24,6 +24,8 @@ def create_app_instance() -> FastAPI:
     app.include_router(requirements.router, prefix="/requirements", tags=["requirements"])
     app.include_router(builds.router, prefix="/builds", tags=["builds"])
     app.include_router(agents.router, prefix="/agents", tags=["agents"])
+    app.include_router(skills.router, prefix="/skills", tags=["skills"])
+    app.include_router(project_links.router, prefix="/api", tags=["project_links"])
     app.include_router(terminal.router, prefix="/ws", tags=["terminal"])
     app.include_router(git.router, prefix="/git", tags=["git"])
     app.include_router(files.router, prefix="/files", tags=["files"])

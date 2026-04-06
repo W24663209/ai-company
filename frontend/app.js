@@ -805,6 +805,8 @@ async function loadProjectSettings() {
     document.getElementById('proj-roles').value = p.agent_roles || '';
     document.getElementById('proj-env').value = envDictToText(p.env || {});
     document.getElementById('proj-claude-settings').value = p.claude_settings || '';
+    // Load project skills
+    await renderProjectSkills();
   } catch (e) {
     toast('加载项目设置失败');
   }
@@ -1715,6 +1717,304 @@ async function saveSharedFile(auto = false) {
   }
 }
 
+// Skills Management
+let skillsCache = [];
+let projectSkillsCache = {}; // projectId -> [skill bindings]
+
+// Load skills list
+async function loadSkills() {
+  try {
+    skillsCache = await api('GET', '/skills');
+  } catch (e) {
+    skillsCache = [];
+  }
+}
+
+// Get project skills
+async function loadProjectSkills(projectId) {
+  try {
+    const data = await api('GET', `/skills/project/${projectId}`);
+    projectSkillsCache[projectId] = data;
+  } catch (e) {
+    projectSkillsCache[projectId] = [];
+  }
+}
+
+// Render project skills in settings panel
+async function renderProjectSkills() {
+  if (!currentProject) return;
+
+  const container = document.getElementById('project-skills-list');
+  if (!container) return;
+
+  await loadProjectSkills(currentProject.id);
+  const bindings = projectSkillsCache[currentProject.id] || [];
+
+  if (bindings.length === 0) {
+    container.innerHTML = `
+      <p class="meta" style="font-size:13px;color:var(--text-muted)">
+        暂无绑定的技能。
+        <button class="btn btn-link" onclick="showSkillsManager()">浏览技能库</button>
+      </p>
+    `;
+    return;
+  }
+
+  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for (const item of bindings) {
+    const skill = item.skill;
+    const binding = item.binding;
+    html += `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <strong style="font-size:14px">${escapeHtml(skill.name)}</strong>
+            <span class="badge" style="font-size:11px;padding:2px 8px;background:var(--primary-light);color:var(--primary);border-radius:4px">${skill.category}</span>
+            <span style="font-size:11px;color:var(--text-muted)">优先级: ${binding.priority}/10</span>
+          </div>
+          <p style="font-size:12px;color:var(--text-muted);margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(skill.description || '暂无描述')}</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-left:12px">
+          <label class="switch" style="position:relative;display:inline-block;width:40px;height:20px">
+            <input type="checkbox" ${binding.enabled ? 'checked' : ''} onchange="toggleProjectSkill('${skill.id}', this.checked)" style="opacity:0;width:0;height:0">
+            <span style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:${binding.enabled ? 'var(--primary)' : '#ccc'};border-radius:20px;transition:.3s"></span>
+          </label>
+          <button class="btn btn-ghost" onclick="showSkillsManager('${skill.id}')" style="padding:4px 8px;font-size:12px">编辑</button>
+          <button class="btn btn-danger" onclick="unbindSkillFromProject('${skill.id}')" style="padding:4px 8px;font-size:12px">解绑</button>
+        </div>
+      </div>
+    `;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// Toggle skill enabled state
+async function toggleProjectSkill(skillId, enabled) {
+  if (!currentProject) return;
+  try {
+    await api('PATCH', `/skills/bind/${currentProject.id}/${skillId}?enabled=${enabled}`);
+    toast(enabled ? '技能已启用' : '技能已禁用');
+    await renderProjectSkills();
+  } catch (e) {
+    toast('操作失败: ' + e.message);
+  }
+}
+
+// Unbind skill from project
+async function unbindSkillFromProject(skillId) {
+  if (!currentProject) return;
+  if (!confirm('确定要解绑这个技能吗？')) return;
+  try {
+    await api('DELETE', `/skills/bind/${currentProject.id}/${skillId}`);
+    toast('技能已解绑');
+    await renderProjectSkills();
+  } catch (e) {
+    toast('解绑失败: ' + e.message);
+  }
+}
+
+// Show skills manager modal
+async function showSkillsManager(editSkillId = null) {
+  document.getElementById('skills-modal').classList.add('show');
+  await loadSkills();
+  renderSkillsList();
+
+  if (editSkillId) {
+    editSkill(editSkillId);
+  }
+}
+
+function closeSkillsModal() {
+  document.getElementById('skills-modal').classList.remove('show');
+}
+
+// Filter skills
+function filterSkills() {
+  renderSkillsList();
+}
+
+// Render skills list in modal
+function renderSkillsList() {
+  const container = document.getElementById('skills-list');
+  const searchTerm = document.getElementById('skill-search').value.toLowerCase();
+  const categoryFilter = document.getElementById('skill-category-filter').value;
+
+  let filtered = skillsCache;
+
+  if (searchTerm) {
+    filtered = filtered.filter(s =>
+      s.name.toLowerCase().includes(searchTerm) ||
+      (s.description || '').toLowerCase().includes(searchTerm) ||
+      s.tags.some(t => t.toLowerCase().includes(searchTerm))
+    );
+  }
+
+  if (categoryFilter) {
+    filtered = filtered.filter(s => s.category === categoryFilter);
+  }
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<p class="meta" style="text-align:center;padding:40px 0">没有找到匹配的技能</p>';
+    return;
+  }
+
+  // Get currently bound skill IDs for this project
+  const boundSkillIds = new Set();
+  if (currentProject && projectSkillsCache[currentProject.id]) {
+    for (const item of projectSkillsCache[currentProject.id]) {
+      boundSkillIds.add(item.skill.id);
+    }
+  }
+
+  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for (const skill of filtered) {
+    const isBound = boundSkillIds.has(skill.id);
+    html += `
+      <div style="display:flex;align-items:flex-start;gap:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+            <strong style="font-size:14px">${escapeHtml(skill.name)}</strong>
+            <span class="badge" style="font-size:11px;padding:2px 8px;background:var(--primary-light);color:var(--primary);border-radius:4px">${skill.category}</span>
+            ${skill.tags.map(t => `<span style="font-size:11px;color:var(--text-muted)">#${escapeHtml(t)}</span>`).join(' ')}
+          </div>
+          <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px 0">${escapeHtml(skill.description || '暂无描述')}</p>
+          <div style="font-size:11px;color:var(--text-muted)">ID: ${skill.id}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${isBound ?
+            `<button class="btn btn-secondary" onclick="editSkillPriority('${skill.id}')">调整优先级</button>
+             <button class="btn btn-danger" onclick="unbindSkillFromProject('${skill.id}');closeSkillsModal();">解绑</button>` :
+            `<button class="btn btn-primary" onclick="bindSkillToProject('${skill.id}')">绑定</button>`
+          }
+          <button class="btn btn-ghost" onclick="editSkill('${skill.id}')">编辑</button>
+        </div>
+      </div>
+    `;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// Bind skill to current project
+async function bindSkillToProject(skillId) {
+  if (!currentProject) {
+    toast('请先选择一个项目');
+    return;
+  }
+  try {
+    await api('POST', `/skills/bind/${currentProject.id}/${skillId}`);
+    toast('技能已绑定');
+    await loadProjectSkills(currentProject.id);
+    renderSkillsList();
+    renderProjectSkills();
+  } catch (e) {
+    toast('绑定失败: ' + e.message);
+  }
+}
+
+// Edit skill priority
+async function editSkillPriority(skillId) {
+  const priority = prompt('设置优先级 (1-10, 数字越大优先级越高):', '5');
+  if (priority === null) return;
+  const p = parseInt(priority);
+  if (isNaN(p) || p < 1 || p > 10) {
+    toast('请输入 1-10 之间的数字');
+    return;
+  }
+  try {
+    await api('PATCH', `/skills/bind/${currentProject.id}/${skillId}?priority=${p}`);
+    toast('优先级已更新');
+    await loadProjectSkills(currentProject.id);
+    renderSkillsList();
+    renderProjectSkills();
+  } catch (e) {
+    toast('更新失败: ' + e.message);
+  }
+}
+
+// Show create skill form
+function showCreateSkillForm() {
+  document.getElementById('skill-form-title').textContent = '新建技能';
+  document.getElementById('skill-id').value = '';
+  document.getElementById('skill-name').value = '';
+  document.getElementById('skill-category').value = 'coding';
+  document.getElementById('skill-tags').value = '';
+  document.getElementById('skill-description').value = '';
+  document.getElementById('skill-content').value = '';
+  document.getElementById('skill-delete-btn').style.display = 'none';
+  document.getElementById('skill-form-modal').classList.add('show');
+}
+
+// Edit skill
+function editSkill(skillId) {
+  const skill = skillsCache.find(s => s.id === skillId);
+  if (!skill) return;
+
+  document.getElementById('skill-form-title').textContent = '编辑技能';
+  document.getElementById('skill-id').value = skill.id;
+  document.getElementById('skill-name').value = skill.name;
+  document.getElementById('skill-category').value = skill.category || 'coding';
+  document.getElementById('skill-tags').value = (skill.tags || []).join(', ');
+  document.getElementById('skill-description').value = skill.description || '';
+  document.getElementById('skill-content').value = skill.content || '';
+  document.getElementById('skill-delete-btn').style.display = 'inline-block';
+  document.getElementById('skill-form-modal').classList.add('show');
+}
+
+function closeSkillFormModal() {
+  document.getElementById('skill-form-modal').classList.remove('show');
+}
+
+// Save skill (create or update)
+async function saveSkill() {
+  const id = document.getElementById('skill-id').value;
+  const name = document.getElementById('skill-name').value.trim();
+  const category = document.getElementById('skill-category').value;
+  const tags = document.getElementById('skill-tags').value;
+  const description = document.getElementById('skill-description').value.trim();
+  const content = document.getElementById('skill-content').value.trim();
+
+  if (!name) return toast('请输入技能名称');
+  if (!content) return toast('请输入技能内容');
+
+  try {
+    if (id) {
+      // Update
+      await api('PATCH', `/skills/${id}?name=${encodeURIComponent(name)}&category=${category}&tags=${encodeURIComponent(tags)}&description=${encodeURIComponent(description)}&content=${encodeURIComponent(content)}`);
+      toast('技能已更新');
+    } else {
+      // Create
+      await api('POST', `/skills?name=${encodeURIComponent(name)}&category=${category}&tags=${encodeURIComponent(tags)}&description=${encodeURIComponent(description)}&content=${encodeURIComponent(content)}`);
+      toast('技能已创建');
+    }
+    closeSkillFormModal();
+    await loadSkills();
+    renderSkillsList();
+    renderProjectSkills();
+  } catch (e) {
+    toast('保存失败: ' + e.message);
+  }
+}
+
+// Delete skill
+async function deleteSkill() {
+  const id = document.getElementById('skill-id').value;
+  if (!id) return;
+  if (!confirm('确定要删除这个技能吗？这将同时解除所有项目的绑定。')) return;
+
+  try {
+    await api('DELETE', `/skills/${id}`);
+    toast('技能已删除');
+    closeSkillFormModal();
+    await loadSkills();
+    renderSkillsList();
+    renderProjectSkills();
+  } catch (e) {
+    toast('删除失败: ' + e.message);
+  }
+}
+
 // SSH & Git
 let sshKeysCache = [];
 
@@ -2060,6 +2360,356 @@ async function resendChat(reqId, msgId) {
       saveWorklog(reqId);
       setChatControlsEnabled(reqId, true);
     }
+  }
+}
+
+// Project Links & Cross-Project Collaboration
+let projectLinksCache = [];
+let crossProjectMessagesCache = [];
+let currentMessageId = null;
+
+// Show project network modal
+async function showProjectNetworkModal() {
+  if (!currentProject) {
+    toast('请先选择一个项目');
+    return;
+  }
+  document.getElementById('project-network-modal').classList.add('show');
+  await loadProjectLinks();
+  await loadCrossProjectMessages();
+  renderProjectLinks();
+  renderCrossProjectMessages();
+  loadProjectOptionsForLink();
+}
+
+function closeProjectNetworkModal() {
+  document.getElementById('project-network-modal').classList.remove('show');
+}
+
+// Load project links
+async function loadProjectLinks() {
+  if (!currentProject) return;
+  try {
+    const data = await api('GET', `/api/${currentProject.id}/linked-projects`);
+    projectLinksCache = data || [];
+  } catch (e) {
+    projectLinksCache = [];
+  }
+}
+
+// Render project links
+function renderProjectLinks() {
+  const container = document.getElementById('project-links-list');
+  if (!container) return;
+
+  if (projectLinksCache.length === 0) {
+    container.innerHTML = '<p class="meta" style="font-size:13px">暂无链接的项目</p>';
+    return;
+  }
+
+  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for (const item of projectLinksCache) {
+    const link = item.link;
+    const project = item.project;
+    const typeLabels = {
+      'related': '相关',
+      'depends_on': '依赖于',
+      'dependency_of': '被依赖',
+      'parent': '父项目',
+      'child': '子项目',
+      'collaborates': '协作'
+    };
+    html += `
+      <div style="padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <strong style="font-size:13px">${escapeHtml(project.name)}</strong>
+          <span class="badge" style="font-size:11px;padding:2px 8px;background:var(--primary-light);color:var(--primary);border-radius:4px">${typeLabels[link.link_type] || link.link_type}</span>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px 0">${escapeHtml(link.description || '暂无描述')}</p>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="sendMessageToLinkedProject('${project.id}')">发消息</button>
+          <button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onclick="deleteProjectLink('${link.id}')">删除链接</button>
+        </div>
+      </div>
+    `;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// Load project options for link creation
+function loadProjectOptionsForLink() {
+  const select = document.getElementById('link-target-project');
+  const messageSelect = document.getElementById('message-target-project');
+  if (!select) return;
+
+  let html = '<option value="">选择项目...</option>';
+  for (const project of projectsCache) {
+    if (project.id !== currentProject?.id) {
+      html += `<option value="${project.id}">${escapeHtml(project.name)}</option>`;
+    }
+  }
+  select.innerHTML = html;
+  if (messageSelect) messageSelect.innerHTML = html;
+}
+
+// Show create link form
+function showCreateLinkForm() {
+  if (!currentProject) return;
+  loadProjectOptionsForLink();
+  document.getElementById('create-link-modal').classList.add('show');
+}
+
+function closeCreateLinkModal() {
+  document.getElementById('create-link-modal').classList.remove('show');
+}
+
+// Create project link
+async function createProjectLink() {
+  if (!currentProject) return;
+
+  const targetId = document.getElementById('link-target-project').value;
+  const linkType = document.getElementById('link-type').value;
+  const description = document.getElementById('link-description').value;
+  const autoRoute = document.getElementById('link-auto-route').checked;
+
+  if (!targetId) return toast('请选择目标项目');
+
+  try {
+    await api('POST', `/api/links?source_project_id=${currentProject.id}&target_project_id=${targetId}&link_type=${linkType}&description=${encodeURIComponent(description)}&auto_route_messages=${autoRoute}`);
+    toast('项目链接创建成功');
+    closeCreateLinkModal();
+    await loadProjectLinks();
+    renderProjectLinks();
+  } catch (e) {
+    toast('创建失败: ' + e.message);
+  }
+}
+
+// Delete project link
+async function deleteProjectLink(linkId) {
+  if (!confirm('确定要删除这个链接吗？')) return;
+  try {
+    await api('DELETE', `/api/links/${linkId}`);
+    toast('链接已删除');
+    await loadProjectLinks();
+    renderProjectLinks();
+  } catch (e) {
+    toast('删除失败: ' + e.message);
+  }
+}
+
+// Load cross-project messages
+async function loadCrossProjectMessages() {
+  if (!currentProject) return;
+  try {
+    const data = await api('GET', `/api/messages?project_id=${currentProject.id}&direction=both`);
+    crossProjectMessagesCache = data || [];
+  } catch (e) {
+    crossProjectMessagesCache = [];
+  }
+}
+
+// Render cross-project messages
+function renderCrossProjectMessages() {
+  const container = document.getElementById('cross-project-messages');
+  if (!container) return;
+
+  if (crossProjectMessagesCache.length === 0) {
+    container.innerHTML = '<p class="meta" style="font-size:13px;text-align:center;padding:40px 0">暂无跨项目消息</p>';
+    return;
+  }
+
+  const typeLabels = {
+    'request': '请求',
+    'response': '回复',
+    'notify': '通知',
+    'delegate': '委派',
+    'question': '问题'
+  };
+
+  const statusLabels = {
+    'pending': '待处理',
+    'delivered': '已送达',
+    'read': '已读',
+    'processing': '处理中',
+    'completed': '已完成',
+    'failed': '失败'
+  };
+
+  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  for (const msg of crossProjectMessagesCache.slice(0, 20)) {
+    const isIncoming = msg.target_project_id === currentProject?.id;
+    const otherProject = isIncoming ? msg.source_project_id : msg.target_project_id;
+    const otherProjectName = projectsCache.find(p => p.id === otherProject)?.name || otherProject;
+
+    html += `
+      <div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer" onclick="showMessageDetail('${msg.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;padding:2px 8px;border-radius:4px;background:${isIncoming ? '#dcfce7' : '#e0e7ff'};color:${isIncoming ? '#166534' : '#3730a3'}">${isIncoming ? '收件' : '发件'}</span>
+            <span class="badge" style="font-size:11px;padding:2px 8px;background:var(--primary-light);color:var(--primary);border-radius:4px">${typeLabels[msg.message_type] || msg.message_type}</span>
+            <strong style="font-size:13px">${escapeHtml(msg.subject)}</strong>
+          </div>
+          <span style="font-size:11px;color:var(--text-muted)">${statusLabels[msg.status] || msg.status}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:12px;color:var(--text-muted)">${isIncoming ? '来自' : '发送至'}: ${escapeHtml(otherProjectName)} | 发送者: ${escapeHtml(msg.sender)}</span>
+          <span style="font-size:11px;color:var(--text-muted)">${new Date(msg.created_at).toLocaleString()}</span>
+        </div>
+      </div>
+    `;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// Show create message form
+function showCreateMessageForm(targetProjectId = null) {
+  if (!currentProject) {
+    toast('请先选择一个项目');
+    return;
+  }
+  loadProjectOptionsForLink();
+  if (targetProjectId) {
+    document.getElementById('message-target-project').value = targetProjectId;
+    loadTargetProjectRequirements();
+  }
+  document.getElementById('create-message-modal').classList.add('show');
+}
+
+function closeCreateMessageModal() {
+  document.getElementById('create-message-modal').classList.remove('show');
+}
+
+// Load target project requirements
+async function loadTargetProjectRequirements() {
+  const projectId = document.getElementById('message-target-project').value;
+  const select = document.getElementById('message-target-requirement');
+  if (!projectId || !select) return;
+
+  select.innerHTML = '<option value="">不关联特定需求</option>';
+  try {
+    const reqs = await api('GET', `/requirements/${projectId}`);
+    for (const req of reqs) {
+      select.innerHTML += `<option value="${req.id}">${escapeHtml(req.title)}</option>`;
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Send cross-project message
+async function sendCrossProjectMessage() {
+  if (!currentProject) return;
+
+  const targetId = document.getElementById('message-target-project').value;
+  const targetReqId = document.getElementById('message-target-requirement').value;
+  const msgType = document.getElementById('message-type').value;
+  const subject = document.getElementById('message-subject').value;
+  const content = document.getElementById('message-content').value;
+
+  if (!targetId) return toast('请选择目标项目');
+  if (!subject) return toast('请输入主题');
+  if (!content) return toast('请输入内容');
+
+  try {
+    await api('POST', `/api/messages?source_project_id=${currentProject.id}&target_project_id=${targetId}&sender=${encodeURIComponent(currentProject.name)}&message_type=${msgType}&subject=${encodeURIComponent(subject)}&content=${encodeURIComponent(content)}&target_requirement_id=${targetReqId}`);
+    toast('消息发送成功');
+    closeCreateMessageModal();
+    await loadCrossProjectMessages();
+    renderCrossProjectMessages();
+  } catch (e) {
+    toast('发送失败: ' + e.message);
+  }
+}
+
+// Send message to linked project
+function sendMessageToLinkedProject(projectId) {
+  showCreateMessageForm(projectId);
+}
+
+// Show message detail
+async function showMessageDetail(messageId) {
+  const msg = crossProjectMessagesCache.find(m => m.id === messageId);
+  if (!msg) return;
+
+  currentMessageId = messageId;
+  document.getElementById('message-detail-subject').textContent = msg.subject;
+
+  const typeLabels = {
+    'request': '请求',
+    'response': '回复',
+    'notify': '通知',
+    'delegate': '委派',
+    'question': '问题'
+  };
+
+  const otherProject = msg.target_project_id === currentProject?.id ? msg.source_project_id : msg.target_project_id;
+  const otherProjectName = projectsCache.find(p => p.id === otherProject)?.name || otherProject;
+
+  document.getElementById('message-detail-content').innerHTML = `
+    <div style="margin-bottom:12px">
+      <span class="badge" style="font-size:12px;padding:4px 12px;background:var(--primary-light);color:var(--primary);border-radius:4px">${typeLabels[msg.message_type] || msg.message_type}</span>
+      <span style="font-size:13px;color:var(--text-muted);margin-left:8px">${msg.target_project_id === currentProject?.id ? '来自' : '发送至'}: ${escapeHtml(otherProjectName)}</span>
+    </div>
+    <div style="background:var(--bg);padding:16px;border-radius:8px;border:1px solid var(--border);font-family:monospace;white-space:pre-wrap">${escapeHtml(msg.content)}</div>
+    <div style="margin-top:12px;font-size:12px;color:var(--text-muted)">
+      发送者: ${escapeHtml(msg.sender)} | 时间: ${new Date(msg.created_at).toLocaleString()}
+    </div>
+  `;
+
+  // Show/hide reply section based on if it's an incoming message
+  const replySection = document.getElementById('message-reply-section');
+  if (msg.target_project_id === currentProject?.id && msg.status !== 'completed') {
+    replySection.style.display = 'block';
+  } else {
+    replySection.style.display = 'none';
+  }
+
+  document.getElementById('message-detail-modal').classList.add('show');
+}
+
+function closeMessageDetailModal() {
+  document.getElementById('message-detail-modal').classList.remove('show');
+  currentMessageId = null;
+}
+
+// Reply to message
+async function replyToMessage() {
+  if (!currentMessageId) return;
+
+  const content = document.getElementById('message-reply-content').value;
+  if (!content) return toast('请输入回复内容');
+
+  try {
+    await api('POST', `/api/messages/${currentMessageId}/reply?sender=${encodeURIComponent(currentProject?.name || 'Unknown')}&content=${encodeURIComponent(content)}`);
+    toast('回复已发送');
+    closeMessageDetailModal();
+    await loadCrossProjectMessages();
+    renderCrossProjectMessages();
+  } catch (e) {
+    toast('发送失败: ' + e.message);
+  }
+}
+
+// Filter functions
+function showInbox() {
+  loadAndRenderMessages('in');
+}
+
+function showOutbox() {
+  loadAndRenderMessages('out');
+}
+
+async function loadAndRenderMessages(direction) {
+  if (!currentProject) return;
+  try {
+    const data = await api('GET', `/api/messages?project_id=${currentProject.id}&direction=${direction}`);
+    crossProjectMessagesCache = data || [];
+    renderCrossProjectMessages();
+  } catch (e) {
+    toast('加载失败: ' + e.message);
   }
 }
 

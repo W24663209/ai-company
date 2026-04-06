@@ -14,6 +14,7 @@ from ai_company.core.exceptions import AICompanyError
 from ai_company.services.git_service import get_ssh_env
 from ai_company.services.project_service import get_project
 from ai_company.services.requirement_service import get_requirement
+from ai_company.services.skill_service import get_skills_prompt_for_project
 
 SSH_DIR = settings.data_dir / "ssh"
 _session_locks: dict[str, threading.Lock] = {}
@@ -71,12 +72,17 @@ def _build_system_prompt(project_id: str, requirement_id: str) -> str:
     req = get_requirement(project.id, requirement_id)
     memory_section = f"\nProject Memory:\n{project.memory}\n" if project.memory else ""
     roles_section = f"\nAgent Roles & Responsibilities:\n{project.agent_roles}\n" if project.agent_roles else ""
+
+    # Get skills for this project
+    skills_prompt = get_skills_prompt_for_project(project_id)
+    skills_section = f"\nActivated Skills:\n{skills_prompt}\n" if skills_prompt else ""
+
     prompt = f"""You are an AI software engineer working on a project managed by AI Company.
 
 Project: {project.name}
 Project Path: {project.path}
 Project Type: {project.type.value}
-{memory_section}{roles_section}
+{memory_section}{roles_section}{skills_section}
 Requirement #{req.id}: {req.title}
 Status: {req.status.value}
 Priority: {req.priority}
