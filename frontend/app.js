@@ -156,9 +156,11 @@ async function loadReqs() {
         <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${r.description || '-'}</td>
         <td><span class="tag status-${r.status}">${r.status}</span></td>
         <td style="width:90px">${r.priority}</td>
-        <td class="actions" style="padding-right:24px;width:160px">
-          ${r.status !== 'done' ? `<button class="btn btn-secondary" onclick="event.stopPropagation();updateReq('${r.id}', '${r.status === 'pending' ? 'in_progress' : 'done'}')">${r.status === 'pending' ? '开始' : '完成'}</button>` : '<span style="color:var(--text-muted)">已完成</span>'}
-          <button class="btn btn-primary" onclick="event.stopPropagation();toggleChat('${r.id}')">工作</button>
+        <td class="actions" style="padding-right:24px;width:200px">
+          <div style="display:flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">
+            ${r.status !== 'done' ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="event.stopPropagation();updateReq('${r.id}', '${r.status === 'pending' ? 'in_progress' : 'done'}')">${r.status === 'pending' ? '开始' : '完成'}</button>` : '<span style="color:var(--text-muted);font-size:12px">已完成</span>'}
+            <button class="btn btn-primary" style="padding:4px 10px;font-size:12px" onclick="event.stopPropagation();toggleChat('${r.id}')">工作</button>
+          </div>
         </td>
       </tr>
     `;
@@ -173,14 +175,24 @@ function renderChatRow(reqId) {
   const history = chatHistories[reqId] || [];
   let bubbles = '';
   if (!history.length) {
-    bubbles = '<div class="empty" style="padding:10px 0">点击发送即可开始与 Claude 对话处理此需求</div>';
+    bubbles = '<div class="empty" style="padding:10px 0">点击发送即可开始与 Claude 对话处理此需求，或使用"协作消息"与其他项目沟通</div>';
   } else {
-    bubbles = history.map(h => `
-      <div class="chat-bubble ${h.role === 'claude' ? 'claude' : 'user'}">
-        <div class="label">${h.role === 'claude' ? 'Claude' : '你'}</div>
-        <div class="text">${escapeHtml(h.text)}</div>
-      </div>
-    `).join('');
+    bubbles = history.map(h => {
+      if (h.isCollab) {
+        return `
+          <div class="chat-bubble collaboration">
+            <div class="label">${h.role === 'claude' ? '协作消息' : '发送协作'}</div>
+            <div class="text">${escapeHtml(h.text)}</div>
+          </div>
+        `;
+      }
+      return `
+        <div class="chat-bubble ${h.role === 'claude' ? 'claude' : 'user'}">
+          <div class="label">${h.role === 'claude' ? 'Claude' : '你'}</div>
+          <div class="text">${escapeHtml(h.text)}</div>
+        </div>
+      `;
+    }).join('');
   }
   const loadingBubble = chatLoadingState[reqId] ? `
     <div class="chat-bubble claude">
@@ -191,10 +203,13 @@ function renderChatRow(reqId) {
   return `
     <tr class="chat-panel-row">
       <td colspan="6" style="padding:0;border-bottom:none">
-        <div class="chat-area" style="border-radius:0;border-left:none;border-right:none;border-bottom:none">
+        <div class="chat-area" style="border-radius:0;border-left:none;border-right:none;border-bottom:none;max-width:800px;margin:0 auto">
           <div class="chat-header">
             <strong>需求工作区</strong>
-            <button class="btn btn-ghost" onclick="closeChat()">收起</button>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-secondary" onclick="showCollaborationModal('${reqId}')" style="font-size:12px;padding:4px 10px">协作消息</button>
+              <button class="btn btn-ghost" onclick="closeChat()">收起</button>
+            </div>
           </div>
           <div id="chat-history-${reqId}" class="chat-messages">
             ${bubbles}
@@ -251,6 +266,7 @@ async function toggleChat(reqId) {
   activeChatReqId = wasOpen ? null : reqId;
   if (!wasOpen) {
     await loadWorklog(reqId);
+    await loadCollabMessagesForReq(reqId);
   }
   loadReqs();
   setTimeout(() => {
@@ -259,6 +275,65 @@ async function toggleChat(reqId) {
     // Auto scroll to bottom (latest message)
     scrollChatToBottom(reqId);
   }, 50);
+}
+
+async function loadCollabMessagesForReq(reqId) {
+  if (!currentProject) return;
+  try {
+    // Get messages where this requirement is the source
+    const allMessages = await api('GET', `/api/messages?project_id=${currentProject.id}&direction=both`);
+    const relatedMessages = allMessages.filter(m =>
+      m.source_requirement_id === reqId || m.target_requirement_id === reqId
+    );
+
+    if (!chatHistories[reqId]) chatHistories[reqId] = [];
+
+    // Add collaboration messages as system messages
+    for (const msg of relatedMessages) {
+      const isOutgoing = msg.source_project_id === currentProject.id;
+      const exists = chatHistories[reqId].some(h =>
+        h.msgId === `collab-${msg.id}` || h.msgId === `collab-reply-${msg.id}`
+      );
+      if (exists) continue;
+
+      if (isOutgoing) {
+        chatHistories[reqId].push({
+          role: 'user',
+          text: `[发送给 ${msg.target_project_name || '其他项目'}] ${msg.subject}\n${msg.content}`,
+          fullText: msg.content,
+          msgId: `collab-${msg.id}`,
+          isCollab: true
+        });
+      } else {
+        chatHistories[reqId].push({
+          role: 'claude',
+          text: `[收到来自 ${msg.source_project_name || '其他项目'}] ${msg.subject}\n${msg.content}`,
+          fullText: msg.content,
+          msgId: `collab-${msg.id}`,
+          isCollab: true
+        });
+      }
+
+      // Check for replies
+      if (msg.reply_to) {
+        const replyExists = chatHistories[reqId].some(h => h.msgId === `collab-reply-${msg.id}`);
+        if (!replyExists) {
+          const replies = allMessages.filter(m => m.reply_to === msg.id);
+          for (const reply of replies) {
+            chatHistories[reqId].push({
+              role: reply.source_project_id === currentProject.id ? 'user' : 'claude',
+              text: `[回复] ${reply.content}`,
+              fullText: reply.content,
+              msgId: `collab-reply-${reply.id}`,
+              isCollab: true
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load collab messages:', e);
+  }
 }
 
 function closeChat() {
@@ -2690,6 +2765,116 @@ async function replyToMessage() {
     renderCrossProjectMessages();
   } catch (e) {
     toast('发送失败: ' + e.message);
+  }
+}
+
+// Collaboration message from workspace
+let currentCollabReqId = null;
+
+function showCollaborationModal(reqId) {
+  currentCollabReqId = reqId;
+  document.getElementById('collab-message-modal').classList.add('show');
+  loadCollabTargetProjects();
+  // Auto-fill subject with requirement info
+  const req = currentReqs.find(r => r.id === reqId);
+  if (req) {
+    document.getElementById('collab-message-subject').value = `关于需求: ${req.title}`;
+  }
+}
+
+function closeCollabMessageModal() {
+  document.getElementById('collab-message-modal').classList.remove('show');
+  currentCollabReqId = null;
+  // Reset form
+  document.getElementById('collab-target-project').innerHTML = '<option value="">选择要协作的项目...</option>';
+  document.getElementById('collab-message-subject').value = '';
+  document.getElementById('collab-message-content').value = '';
+  document.getElementById('collab-message-error').style.display = 'none';
+}
+
+async function loadCollabTargetProjects() {
+  try {
+    // Get all projects except current
+    const projects = await api('GET', '/projects');
+    const select = document.getElementById('collab-target-project');
+    select.innerHTML = '<option value="">选择要协作的项目...</option>';
+
+    // Also get linked projects first
+    let linkedProjectIds = new Set();
+    try {
+      const linked = await api('GET', `/api/${currentProject.id}/linked-projects`);
+      linked.forEach(l => {
+        linkedProjectIds.add(l.project.id);
+        // Add linked projects at top
+        const option = document.createElement('option');
+        option.value = l.project.id;
+        option.textContent = `[已链接] ${l.project.name} (${l.project.type})`;
+        select.appendChild(option);
+      });
+    } catch (e) {
+      // No linked projects
+    }
+
+    // Add other projects
+    projects.filter(p => p.id !== currentProject.id && !linkedProjectIds.has(p.id)).forEach(p => {
+      const option = document.createElement('option');
+      option.value = p.id;
+      option.textContent = `${p.name} (${p.type})`;
+      select.appendChild(option);
+    });
+  } catch (e) {
+    console.error('Failed to load projects:', e);
+  }
+}
+
+async function sendCollabMessage() {
+  if (!currentCollabReqId || !currentProject) return;
+
+  const targetId = document.getElementById('collab-target-project').value;
+  const msgType = document.getElementById('collab-message-type').value;
+  const subject = document.getElementById('collab-message-subject').value.trim();
+  const content = document.getElementById('collab-message-content').value.trim();
+  const errorEl = document.getElementById('collab-message-error');
+
+  if (!targetId) {
+    errorEl.textContent = '请选择目标项目';
+    errorEl.style.display = 'block';
+    return;
+  }
+  if (!subject) {
+    errorEl.textContent = '请填写主题';
+    errorEl.style.display = 'block';
+    return;
+  }
+  if (!content) {
+    errorEl.textContent = '请填写详细内容';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    await api('POST', `/api/messages?source_project_id=${currentProject.id}&target_project_id=${targetId}&sender=${encodeURIComponent(currentProject.name)}&message_type=${msgType}&subject=${encodeURIComponent(subject)}&content=${encodeURIComponent(content)}&source_requirement_id=${currentCollabReqId}`);
+
+    toast('协作消息已发送');
+    closeCollabMessageModal();
+
+    // Add to chat history
+    const req = currentReqs.find(r => r.id === currentCollabReqId);
+    const targetSelect = document.getElementById('collab-target-project');
+    const targetName = targetSelect.options[targetSelect.selectedIndex].textContent;
+
+    // Add system message to chat
+    if (!chatHistories[currentCollabReqId]) chatHistories[currentCollabReqId] = [];
+    chatHistories[currentCollabReqId].push({
+      role: 'user',
+      text: `[协作消息已发送给 ${targetName}]\n主题: ${subject}\n内容: ${content}`,
+      fullText: `[协作消息已发送给 ${targetName}]\n主题: ${subject}\n内容: ${content}`,
+      msgId: Date.now().toString()
+    });
+    renderReqs();
+  } catch (e) {
+    errorEl.textContent = '发送失败: ' + e.message;
+    errorEl.style.display = 'block';
   }
 }
 

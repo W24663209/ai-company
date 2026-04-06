@@ -266,7 +266,7 @@
     }
     .chat-header strong { font-size: 15px; color: var(--text); }
     .chat-messages {
-      max-height: 800px;
+      max-height: 400px;
       overflow-y: auto;
       margin-bottom: 16px;
       padding-right: 8px;
@@ -314,10 +314,28 @@
       border-color: rgba(99,102,241,0.15);
     }
     .chat-bubble.claude .label { color: #4f46e5; }
+    .chat-bubble.collaboration { text-align: center; }
+    .chat-bubble.collaboration .label {
+      color: #059669;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .chat-bubble.collaboration .text {
+      background: #ecfdf5;
+      border-color: #a7f3d0;
+      color: #065f46;
+      text-align: left;
+      max-width: 90%;
+    }
     .chat-input-wrapper {
       display: flex;
       gap: 12px;
       align-items: flex-end;
+      flex-wrap: wrap;
+    }
+    .chat-input-wrapper .btn {
+      flex-shrink: 0;
     }
     .chat-input {
       flex: 1;
@@ -442,7 +460,7 @@
         <div class="card" style="padding:0;overflow:hidden">
           <table>
             <thead>
-              <tr><th style="padding-left:24px">ID</th><th>标题</th><th>描述</th><th>状态</th><th style="width:90px">优先级</th><th style="padding-right:24px;width:160px">操作</th></tr>
+              <tr><th style="padding-left:24px">ID</th><th>标题</th><th>描述</th><th>状态</th><th style="width:90px">优先级</th><th style="padding-right:24px;width:200px">操作</th></tr>
             </thead>
             <tbody id="reqs-body">
               <tr><td colspan="6" class="empty">加载中...</td></tr>
@@ -837,6 +855,47 @@
           <div class="form-row" style="justify-content:flex-end">
             <button class="btn btn-primary" onclick="replyToMessage()">发送回复</button>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Collaboration Message Modal (from workspace) -->
+  <div id="collab-message-modal" class="modal-overlay" onclick="if(event.target===this)closeCollabMessageModal()">
+    <div class="modal" style="max-width:600px">
+      <div class="modal-header">
+        <h3 style="margin:0">发送协作消息</h3>
+        <button class="btn btn-ghost" onclick="closeCollabMessageModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px">
+        <p style="margin:0 0 16px 0;color:var(--text-muted);font-size:13px">向其他项目发送消息，请求协助或反馈问题</p>
+        <div class="form-group" style="margin-bottom:16px">
+          <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500">目标项目</label>
+          <select id="collab-target-project" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px">
+            <option value="">选择要协作的项目...</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:16px">
+          <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500">消息类型</label>
+          <select id="collab-message-type" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px">
+            <option value="request">请求协助 - 需要对方完成某项工作</option>
+            <option value="question">询问问题 - 需要对方确认或解答</option>
+            <option value="notify">同步通知 - 告知对方某个变更</option>
+            <option value="feedback">反馈问题 - 指出对方的问题需要修改</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:16px">
+          <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500">主题</label>
+          <input id="collab-message-subject" placeholder="例如：用户登录接口需要增加验证码校验" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px">
+        </div>
+        <div class="form-group" style="margin-bottom:16px">
+          <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500">详细内容</label>
+          <textarea id="collab-message-content" placeholder="详细描述你的需求或问题...&#10;&#10;例如：&#10;- 当前登录接口在密码错误时没有返回剩余尝试次数&#10;- 需要增加图形验证码校验，防止暴力破解&#10;- 建议错误3次后触发验证码" style="width:100%;min-height:140px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-family:monospace;font-size:13px"></textarea>
+        </div>
+        <div id="collab-message-error" style="color:#dc2626;font-size:13px;margin-bottom:12px;display:none"></div>
+        <div style="display:flex;justify-content:flex-end;gap:10px">
+          <button class="btn btn-secondary" onclick="closeCollabMessageModal()">取消</button>
+          <button class="btn btn-primary" onclick="sendCollabMessage()">发送消息</button>
         </div>
       </div>
     </div>
