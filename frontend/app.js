@@ -5049,7 +5049,18 @@ async function triggerAgentParticipation(reqId, userMessage, claudeResponse) {
     // Check for code changes in the response
     const hasCodeChanges = claudeResponse.includes('```') ||
                            claudeResponse.includes('git diff') ||
-                           claudeResponse.includes('modified:');
+                           claudeResponse.includes('modified:') ||
+                           claudeResponse.includes('diff --git') ||
+                           claudeResponse.includes('@@ ') ||
+                           /\.(py|js|ts|java|go|rs|cpp|c|h|jsx|tsx|vue|php|rb)\b/.test(claudeResponse) ||
+                           claudeResponse.includes('class ') ||
+                           claudeResponse.includes('function ') ||
+                           claudeResponse.includes('def ') ||
+                           claudeResponse.includes('const ') ||
+                           claudeResponse.includes('let ') ||
+                           claudeResponse.includes('var ');
+
+    console.log('[Agent Participation] hasCodeChanges:', hasCodeChanges, 'response length:', claudeResponse.length);
 
     // Determine which agents should participate
     const participatingAgents = [];
@@ -5088,9 +5099,12 @@ async function triggerAgentParticipation(reqId, userMessage, claudeResponse) {
       }
     }
 
+    console.log('[Agent Participation] Triggering agents:', participatingAgents.map(a => a.agent_name));
+
     // Trigger each participating agent with a delay
     for (const agent of participatingAgents.sort((a, b) => a.priority - b.priority)) {
       setTimeout(() => {
+        console.log(`[Agent Participation] Starting ${agent.agent_name} (${agent.role})...`);
         requestAgentParticipation(reqId, agent, userMessage, claudeResponse);
       }, agent.priority * 2000); // 2s delay between agents
     }
@@ -5117,46 +5131,71 @@ async function requestAgentParticipation(reqId, agent, userMessage, claudeRespon
     switch (agent.role) {
       case 'pm':
         agentTitle = 'PM (项目经理)';
-        agentPrompt = `作为项目经理，请 review 以下开发对话，提供你的专业意见：
+        agentPrompt = `你现在是项目经理(PM)，请 review 以下开发对话，提供你的专业意见。
 
+Review 要点：
 1. 需求理解是否正确？
 2. 实现方案是否合理？
 3. 是否有遗漏的风险或注意事项？
 4. 下一步建议
 
-【用户原始需求】: ${userMessage.substring(0, 500)}${userMessage.length > 500 ? '...' : ''}
+【用户原始需求】: ${userMessage.substring(0, 500)}${userMessage.length > 500 ? '\n...(截断)' : ''}
 
-【Claude 的回复】: ${claudeResponse.substring(0, 1000)}${claudeResponse.length > 1000 ? '...' : ''}
+【Claude 的回复】: ${claudeResponse.substring(0, 1000)}${claudeResponse.length > 1000 ? '\n...(截断)' : ''}
 
-请用中文简洁回复（3-5点），以 "📋 PM Review:" 开头。`;
+【重要】你必须回复 review 意见，格式如下：
+📋 PM Review:
+- 需求理解: [评估]
+- 方案评价: [评估]
+- 风险提醒: [风险点]
+- 下一步: [建议]
+
+请用中文回复。`;
         break;
 
       case 'reviewer':
         agentTitle = 'CodeReviewer (代码审核)';
-        agentPrompt = `作为代码审核员，请 review 以下代码变更：
+        agentPrompt = `你现在是代码审核员(CodeReviewer)，必须对以下代码变更进行审核并给出报告。
 
-1. 代码质量评估
-2. 潜在问题或 bug
-3. 性能考虑
-4. 最佳实践建议
+审核要点：
+1. 代码质量评估 - 代码是否清晰、可维护
+2. 潜在问题或 bug - 是否有明显错误
+3. 性能考虑 - 是否有性能隐患
+4. 最佳实践建议 - 是否符合语言/框架规范
 
-【代码变更】: ${claudeResponse.substring(0, 1500)}${claudeResponse.length > 1500 ? '...' : ''}
+【代码变更内容】:
+${claudeResponse.substring(0, 3000)}${claudeResponse.length > 3000 ? '\n\n...(内容已截断)' : ''}
 
-请用中文简洁回复，以 "🔍 Code Review:" 开头。如果有代码问题，请指出具体行。`;
+【重要】你必须回复审核报告，格式如下：
+🔍 Code Review 报告:
+- 审核结果: [通过/需要修改]
+- 发现问题: [列出发现的问题，如果没有则写"无"]
+- 改进建议: [具体改进建议]
+- 风险等级: [低/中/高]
+
+请用中文回复。`;
         break;
 
       case 'architect':
         agentTitle = 'Architect (架构师)';
-        agentPrompt = `作为架构师，请评估以下设计方案：
+        agentPrompt = `你现在是架构师(Architect)，请评估以下设计方案。
 
-1. 架构合理性
-2. 可扩展性考虑
-3. 技术选型建议
-4. 潜在技术债务
+评估要点：
+1. 架构合理性 - 是否符合设计原则
+2. 可扩展性考虑 - 是否能应对未来需求
+3. 技术选型建议 - 技术栈是否合适
+4. 潜在技术债务 - 是否有遗留问题
 
-【设计讨论】: ${claudeResponse.substring(0, 1500)}${claudeResponse.length > 1500 ? '...' : ''}
+【设计讨论内容】: ${claudeResponse.substring(0, 2000)}${claudeResponse.length > 2000 ? '\n\n...(内容已截断)' : ''}
 
-请用中文简洁回复，以 "🏗️ Architecture:" 开头。`;
+【重要】你必须回复架构评估报告，格式如下：
+🏗️ Architecture 评估:
+- 架构评价: [评估]
+- 可扩展性: [评估]
+- 技术选型: [建议]
+- 技术债务: [风险提示]
+
+请用中文回复。`;
         break;
     }
 
@@ -5207,8 +5246,10 @@ async function requestAgentParticipation(reqId, agent, userMessage, claudeRespon
     // Remove thinking bubble
     removeAgentThinkingBubble(reqId, agentTitle);
 
+    console.log(`[Agent Participation] ${agentTitle} response:`, agentResponse ? agentResponse.substring(0, 200) + '...' : 'EMPTY');
+
     // Add agent response to chat
-    if (agentResponse) {
+    if (agentResponse && agentResponse.trim()) {
       chatHistories[reqId].push({
         role: 'agent',
         agent_name: agentTitle,
@@ -5217,6 +5258,12 @@ async function requestAgentParticipation(reqId, agent, userMessage, claudeRespon
       appendAgentChatBubble(reqId, agentTitle, agentResponse);
       scrollChatToBottom(reqId);
       saveWorklog(reqId);
+    } else {
+      // If no response, show a minimal feedback
+      console.warn(`[Agent Participation] ${agentTitle} returned empty response`);
+      const emptyResponseMsg = `[${agentTitle} 已完成审核，但未返回详细报告]`;
+      appendAgentChatBubble(reqId, agentTitle, emptyResponseMsg);
+      scrollChatToBottom(reqId);
     }
 
     // Update agent status back to idle
