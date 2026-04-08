@@ -5037,22 +5037,10 @@ window.loadSharedDocsContentForSending = loadSharedDocsContentForSending;
 // ============================================
 
 // Track agent participation state
-let agentParticipationState = {}; // reqId -> { lastParticipated: timestamp, count: number }
+let agentParticipationState = {}; // reqId -> { lastPmParticipated: timestamp, count: number }
 
 // Trigger agent participation after user conversation
 async function triggerAgentParticipation(reqId, userMessage, claudeResponse) {
-  // Check if agents should participate (avoid too frequent participation)
-  const now = Date.now();
-  const state = agentParticipationState[reqId] || { lastParticipated: 0, count: 0 };
-
-  // Only participate every 3 messages or if 5 minutes passed
-  state.count++;
-  if (state.count % 3 !== 0 && now - state.lastParticipated < 300000) {
-    return;
-  }
-  state.lastParticipated = now;
-  agentParticipationState[reqId] = state;
-
   // Get active agents
   try {
     const agents = await api('GET', '/agents/presence');
@@ -5066,19 +5054,25 @@ async function triggerAgentParticipation(reqId, userMessage, claudeResponse) {
     // Determine which agents should participate
     const participatingAgents = [];
 
-    // PM always participates to summarize/provide guidance
-    const pmAgent = agents.find(a => a.agent_name.includes('PM') || a.agent_name.includes('项目经理'));
-    if (pmAgent) {
-      participatingAgents.push({ ...pmAgent, role: 'pm', priority: 1 });
-    }
-
-    // CodeReviewer participates if there are code changes
+    // CodeReviewer ALWAYS participates if there are code changes (no frequency limit)
     if (hasCodeChanges) {
       const reviewerAgent = agents.find(a => a.agent_name.includes('CodeReviewer') || a.agent_name.includes('代码审核'));
       if (reviewerAgent) {
-        participatingAgents.push({ ...reviewerAgent, role: 'reviewer', priority: 2 });
+        participatingAgents.push({ ...reviewerAgent, role: 'reviewer', priority: 1 });
       }
     }
+
+    // Check if PM should participate (every 3 messages or 5 minutes)
+    const now = Date.now();
+    const state = agentParticipationState[reqId] || { lastPmParticipated: 0, count: 0 };
+    state.count++;
+
+    const pmAgent = agents.find(a => a.agent_name.includes('PM') || a.agent_name.includes('项目经理'));
+    if (pmAgent && (state.count % 3 === 0 || now - state.lastPmParticipated >= 300000)) {
+      participatingAgents.push({ ...pmAgent, role: 'pm', priority: 2 });
+      state.lastPmParticipated = now;
+    }
+    agentParticipationState[reqId] = state;
 
     // Architect participates for design/architecture discussions
     const hasArchitectureDiscussion = userMessage.includes('设计') ||
