@@ -4556,17 +4556,21 @@ function renderWorkMessageForm(reqId) {
           html += `</div>`;
         }
 
-        // Show shared docs content if any
+        // Show shared docs paths if any (with delete button)
         if (sharedContent) {
-          const sharedDocNames = sharedContent.split('\n\n').map(block => block.split(':')[0]).filter(n => n);
-          if (sharedDocNames.length > 0) {
-            html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">`;
-            html += `<span style="font-size:11px;color:var(--text-muted);">已选共享文档:</span>`;
-            sharedDocNames.forEach(name => {
-              html += `<span style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:4px;font-size:11px;">`;
-              html += `📄 ${escapeHtml(name)}`;
-              html += `</span>`;
+          const sharedDocPaths = sharedContent.split('\n').filter(p => p.trim());
+          if (sharedDocPaths.length > 0) {
+            html += `<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">`;
+            html += `<span style="font-size:11px;color:var(--text-muted);font-weight:500;">已选共享文档路径:</span>`;
+            html += `<div style="display:flex;flex-direction:column;gap:4px;">`;
+            sharedDocPaths.forEach(path => {
+              const fileName = path.split('/').pop() || path;
+              html += `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:12px;">`;
+              html += `<span style="color:var(--text);word-break:break-all;" title="${escapeHtml(path)}">📄 ${escapeHtml(path)}</span>`;
+              html += `<button type="button" onclick="removeSharedDoc('${field.name.replace(/'/g, "\\'")}', '${escapeHtml(path).replace(/'/g, "\\'")}')" style="flex-shrink:0;background:none;border:none;cursor:pointer;padding:2px 6px;color:#dc2626;font-size:14px;line-height:1;" title="删除">✕</button>`;
+              html += `</div>`;
             });
+            html += `</div>`;
             html += `</div>`;
           }
         }
@@ -4634,9 +4638,20 @@ function composeWorkMessage() {
         });
         message += '\n';
       }
-      // Add shared docs content
-      if (value && value.includes('```')) {
-        message += `${field.label} (共享文档):\n${value}\n\n`;
+      // Add shared docs content (loaded when sending)
+      const sharedContent = currentWorkMessageData[`${field.name}_content`];
+      if (sharedContent) {
+        message += `${field.label} (共享文档):\n${sharedContent}\n\n`;
+      } else if (value && value.trim()) {
+        // Fallback: show paths if content not loaded yet
+        const paths = value.split('\n').filter(p => p.trim());
+        if (paths.length > 0) {
+          message += `${field.label} (共享文档路径):\n`;
+          paths.forEach(p => {
+            message += `- ${p}\n`;
+          });
+          message += '\n';
+        }
       }
     } else if (value) {
       message += `${field.label}: ${value}\n\n`;
@@ -4723,6 +4738,9 @@ async function sendWorkMessage(reqId) {
     return;
   }
 
+  // Load shared docs content before composing message
+  await loadSharedDocsContentForSending(fields);
+
   const message = composeWorkMessage();
   if (!message) {
     toast('请填写消息内容');
@@ -4747,8 +4765,47 @@ async function sendWorkMessage(reqId) {
   await sendChat(reqId);
 
   clearWorkMessageForm();
+  selectedSharedDocs = {}; // Clear selected shared docs
   // Use setTimeout to avoid race condition with toggleChat
   setTimeout(() => renderWorkMessageForm(reqId), 0);
+}
+
+// Load shared docs content for sending
+async function loadSharedDocsContentForSending(fields) {
+  for (const field of fields) {
+    if (field.type === 'file') {
+      const pathsStr = currentWorkMessageData[field.name] || '';
+      const paths = pathsStr.split('\n').filter(p => p.trim());
+
+      if (paths.length > 0) {
+        const fileContents = [];
+        for (const path of paths) {
+          try {
+            const data = await api('GET', `/files/shared?path=${encodeURIComponent(path)}`);
+            if (data.type === 'file' && data.readable) {
+              fileContents.push({
+                path: path,
+                name: data.name,
+                content: data.content
+              });
+            }
+          } catch (e) {
+            console.error('Failed to load shared file:', path, e);
+            fileContents.push({
+              path: path,
+              name: path.split('/').pop() || path,
+              content: `[无法加载文件内容: ${e.message}]`
+            });
+          }
+        }
+
+        // Store content in a separate key for sending
+        currentWorkMessageData[`${field.name}_content`] = fileContents.map(f =>
+          `${f.name}:\n\`\`\`\n${f.content.substring(0, 5000)}${f.content.length > 5000 ? '\n...(truncated)' : ''}\n\`\`\``
+        ).join('\n\n');
+      }
+    }
+  }
 }
 
 // ============================================
@@ -4940,31 +4997,26 @@ async function confirmSharedDocSelection() {
 
   const selectedPaths = selectedSharedDocs[fieldName] || [];
 
-  // Load content of selected files
-  const fileContents = [];
-  for (const path of selectedPaths) {
-    try {
-      const data = await api('GET', `/files/shared?path=${encodeURIComponent(path)}`);
-      if (data.type === 'file' && data.readable) {
-        fileContents.push({
-          path: path,
-          name: data.name,
-          content: data.content
-        });
-      }
-    } catch (e) {
-      console.error('Failed to load shared file:', path, e);
-    }
-  }
-
-  // Store in work message data
-  currentWorkMessageData[fieldName] = fileContents.map(f => `${f.name}:\n\`\`\`\n${f.content.substring(0, 2000)}${f.content.length > 2000 ? '\n...(truncated)' : ''}\n\`\`\``).join('\n\n');
+  // Store only file paths (not content) for display
+  // Content will be loaded when sending the message
+  currentWorkMessageData[fieldName] = selectedPaths.join('\n');
 
   // Update UI
   renderWorkMessageForm(reqId);
 
   closeSharedDocSelector();
-  toast(`已添加 ${fileContents.length} 个共享文档`);
+  toast(`已选择 ${selectedPaths.length} 个共享文档`);
+}
+
+// Remove a shared doc from selection
+function removeSharedDoc(fieldName, path) {
+  if (selectedSharedDocs[fieldName]) {
+    selectedSharedDocs[fieldName] = selectedSharedDocs[fieldName].filter(p => p !== path);
+    // Update the stored paths
+    currentWorkMessageData[fieldName] = selectedSharedDocs[fieldName].join('\n');
+    const reqId = activeChatReqId;
+    if (reqId) renderWorkMessageForm(reqId);
+  }
 }
 
 // Also make shared doc functions available globally
@@ -4973,6 +5025,8 @@ window.toggleSharedDocSelection = toggleSharedDocSelection;
 window.confirmSharedDocSelection = confirmSharedDocSelection;
 window.closeSharedDocSelector = closeSharedDocSelector;
 window.showSharedDocSelector = showSharedDocSelector;
+window.removeSharedDoc = removeSharedDoc;
+window.loadSharedDocsContentForSending = loadSharedDocsContentForSending;
 
 // ============================================
 // Agent Presence Management
