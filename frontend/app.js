@@ -313,10 +313,14 @@ function renderChatRow(reqId) {
             </div>
           </div>
 
-          <div id="chat-history-${reqId}" class="chat-messages">
+          <div id="chat-history-${reqId}" class="chat-messages" onscroll="handleChatScroll('${reqId}')">
             ${bubbles}
             ${loadingBubble}
           </div>
+          <!-- Scroll to bottom button -->
+          <button id="scroll-to-bottom-btn-${reqId}" onclick="scrollChatToBottom('${reqId}', true)" style="display:none;position:absolute;right:20px;bottom:140px;z-index:100;padding:8px 12px;background:#3b82f6;color:#fff;border:none;border-radius:20px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-size:12px;align-items:center;gap:4px;">
+            ⬇️ 最新
+          </button>
           ${codeChangesPanel}
           <div id="chat-files-${reqId}" class="chat-files-list" style="display:none;padding:8px 12px;background:#f8f9fa;border-top:1px solid var(--border);max-height:100px;overflow-y:auto;"></div>
           <div class="ws-status" id="ws-status-${reqId}" style="display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px;color:#666;background:#f8f9fa;border-top:1px solid var(--border);">
@@ -831,7 +835,23 @@ function scrollChatToBottom(reqId, smooth = false) {
       behavior: smooth ? 'smooth' : 'auto'
     });
   }
+  // Hide the scroll-to-bottom button
+  const btn = document.getElementById(`scroll-to-bottom-btn-${reqId}`);
+  if (btn) btn.style.display = 'none';
 }
+
+// Handle chat scroll to show/hide scroll-to-bottom button
+function handleChatScroll(reqId) {
+  const container = document.getElementById(`chat-history-${reqId}`);
+  const btn = document.getElementById(`scroll-to-bottom-btn-${reqId}`);
+  if (!container || !btn) return;
+
+  // Show button if scrolled up more than 100px from bottom
+  const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+  btn.style.display = isNearBottom ? 'none' : 'flex';
+}
+
+window.handleChatScroll = handleChatScroll;
 
 function setChatControlsEnabled(reqId, enabled) {
   const input = document.getElementById(`chat-input-${reqId}`);
