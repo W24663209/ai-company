@@ -11,6 +11,7 @@
   <script src="xterm.min.js"></script>
   <script src="xterm-addon-fit.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.37.0/src-min/ace.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/ace-builds@1.37.0/src-min/ext-language_tools.js"></script>
   <style>
     :root {
       --primary: #4f46e5;
@@ -35,7 +36,7 @@
       line-height: 1.6;
       min-height: 100vh;
     }
-    .container { max-width: 1920px; margin: 0 auto; padding: 32px 24px; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 32px 24px; }
     header {
       display: flex;
       align-items: center;
@@ -195,12 +196,12 @@
     .breadcrumbs a:hover { text-decoration: underline; }
     h2 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
     h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text); }
-    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; table-layout: fixed; }
     th, td { text-align: left; padding: 14px 12px; border-bottom: 1px solid var(--border); }
     th { color: var(--text-muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
     tr:hover td { background: rgba(0,0,0,0.03); }
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .actions .btn { padding: 6px 12px; font-size: 12px; }
+    .actions { display: flex; gap: 6px; flex-wrap: nowrap; justify-content: flex-end; }
+    .actions .btn { padding: 4px 10px; font-size: 12px; flex-shrink: 0; }
     .log {
       background: var(--bg);
       color: var(--text);
@@ -330,15 +331,17 @@
     }
     .chat-input-wrapper {
       display: flex;
-      gap: 12px;
+      gap: 8px;
       align-items: flex-end;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
     }
     .chat-input-wrapper .btn {
       flex-shrink: 0;
+      white-space: nowrap;
     }
     .chat-input {
       flex: 1;
+      min-width: 200px;
       min-height: 56px;
       max-height: 150px;
       resize: vertical;
@@ -377,7 +380,7 @@
     </header>
 
     <!-- 项目列表 -->
-    <div id="view-list">
+    <div id="view-list" style="max-width:1400px;margin-left:auto;margin-right:auto">
       <div class="card">
         <h3 style="margin-top:0">创建新项目</h3>
         <div class="form-row">
@@ -419,7 +422,7 @@
     </div>
 
     <!-- 项目详情 -->
-    <div id="view-project" class="hidden">
+    <div id="view-project" class="hidden" style="max-width:1400px;margin-left:auto;margin-right:auto">
       <div class="breadcrumbs"><a onclick="goHome()">项目列表</a> / <span id="proj-breadcrumb-name"></span></div>
       <div class="card" style="padding:20px 24px">
         <div class="flex-between">
@@ -438,13 +441,14 @@
         <button class="tab-btn" onclick="showProjectTab('builds')">构建</button>
         <button class="tab-btn" onclick="showProjectTab('files')">文件</button>
         <button class="tab-btn" onclick="showProjectTab('shared')">共享</button>
+        <button class="tab-btn" onclick="showProjectTab('database')">数据库</button>
         <button class="tab-btn" onclick="showProjectTab('terminal')">终端</button>
         <button class="tab-btn" onclick="showProjectNetworkModal()">协作</button>
         <button class="tab-btn" onclick="showProjectTab('settings')">设置</button>
       </div>
 
       <div id="panel-requirements" class="panel">
-        <div class="card">
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
           <h3>添加需求</h3>
           <div class="form-row">
             <input id="req-title" placeholder="需求标题" style="flex:1;max-width:260px">
@@ -457,10 +461,10 @@
           </p>
         </div>
 
-        <div class="card" style="padding:0;overflow:hidden">
+        <div class="card" style="padding:0;overflow:hidden;max-width:1400px;margin-left:auto;margin-right:auto">
           <table>
             <thead>
-              <tr><th style="padding-left:24px">ID</th><th>标题</th><th>描述</th><th>状态</th><th style="width:90px">优先级</th><th style="padding-right:24px;width:200px">操作</th></tr>
+              <tr><th style="padding-left:24px;width:60px">ID</th><th style="width:25%">标题</th><th style="width:35%">描述</th><th style="width:80px">状态</th><th style="width:70px">优先级</th><th style="padding-right:24px;width:180px">操作</th></tr>
             </thead>
             <tbody id="reqs-body">
               <tr><td colspan="6" class="empty">加载中...</td></tr>
@@ -470,7 +474,7 @@
       </div>
 
       <div id="panel-builds" class="panel hidden">
-        <div class="card">
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
           <h3>运行构建</h3>
           <div class="form-row">
             <select id="build-type">
@@ -500,7 +504,7 @@
       </div>
 
       <div id="panel-files" class="panel hidden">
-        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px">
+        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px;max-width:1400px;margin-left:auto;margin-right:auto">
           <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
             <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
               <strong style="font-size:14px">文件浏览</strong>
@@ -522,7 +526,7 @@
       </div>
 
       <div id="panel-shared" class="panel hidden">
-        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px">
+        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px;max-width:1400px;margin-left:auto;margin-right:auto">
           <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
             <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
               <strong style="font-size:14px">共享目录</strong>
@@ -544,7 +548,7 @@
       </div>
 
       <div id="panel-terminal" class="panel hidden">
-        <div class="card" style="margin-bottom:20px">
+        <div class="card" style="margin-bottom:20px;max-width:1400px;margin-left:auto;margin-right:auto">
           <h3 style="margin-top:0">快捷脚本</h3>
           <div id="terminal-scripts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
             <span class="meta" style="font-size:13px;color:var(--text-muted)">暂无保存的脚本</span>
@@ -555,7 +559,7 @@
             <button class="btn btn-secondary" onclick="addTerminalScript()">添加</button>
           </div>
         </div>
-        <div class="card" id="terminal-card" style="padding:0;overflow:hidden;height:780px;display:flex;flex-direction:column;">
+        <div class="card" id="terminal-card" style="padding:0;overflow:hidden;height:780px;display:flex;flex-direction:column;max-width:1400px;margin-left:auto;margin-right:auto">
           <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
             <strong>交互式终端</strong>
             <div class="form-row" style="gap:8px;">
@@ -578,28 +582,111 @@
         </div>
       </div>
 
+      <div id="panel-database" class="panel hidden">
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0">数据库连接</h3>
+            <button class="btn btn-primary" onclick="showCreateDbConnectionModal()">+ 新建连接</button>
+          </div>
+          <div id="db-connections-list" style="margin-bottom:20px">
+            <p class="meta" style="font-size:13px">加载中...</p>
+          </div>
+        </div>
+
+        <div id="db-query-panel" class="card hidden" style="max-width:1400px;margin-left:auto;margin-right:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:16px">
+            <div>
+              <h3 style="margin:0">SQL 查询</h3>
+              <p class="meta" style="margin:4px 0 0 0;font-size:13px" id="db-current-connection">当前连接: 无</p>
+            </div>
+            <div class="form-row">
+              <select id="db-database-select" onchange="onDbDatabaseChange()" style="min-width:150px">
+                <option value="">选择数据库...</option>
+              </select>
+              <button class="btn btn-secondary" onclick="refreshDbTables()">刷新表</button>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:16px;height:600px">
+            <div style="width:260px;min-width:260px;display:flex;flex-direction:column;gap:10px;border-right:1px solid var(--border);padding-right:16px">
+              <strong style="font-size:14px">数据表</strong>
+              <div id="db-tables-list" style="flex:1;overflow:auto;font-size:13px">
+                <p class="meta" style="font-size:13px">请选择数据库</p>
+              </div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <div id="db-sql-editor" style="flex:1;min-height:120px;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
+                <button class="btn btn-primary" onclick="executeDbQuery()" style="white-space:nowrap">执行查询<br><small style="font-size:11px;opacity:0.8">Ctrl+Enter</small></button>
+              </div>
+
+              <div id="db-query-status" style="display:none;padding:8px 12px;background:var(--surface);border-radius:8px;font-size:13px">
+                <!-- Query status info -->
+              </div>
+
+              <div style="flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg)">
+                <table id="db-query-results" style="font-size:12px;table-layout:auto">
+                  <thead><tr><th style="padding:8px">结果将显示在这里</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="panel-settings" class="panel hidden">
-        <div class="card">
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
           <h3>项目记忆</h3>
           <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">Claude 在处理需求时会自动读取这些上下文，帮助保持跨对话的一致性。</p>
           <textarea id="proj-memory" placeholder="记录项目关键上下文、历史决策、约束条件等..." style="width:100%;min-height:200px"></textarea>
         </div>
-        <div class="card">
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
           <h3>智能体工作职责</h3>
           <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">定义参与该项目的智能体角色、分工和行为准则。</p>
           <textarea id="proj-roles" placeholder="例如：前端智能体负责 React 组件开发，后端智能体负责 API 实现..." style="width:100%;min-height:200px"></textarea>
         </div>
-        <div class="card">
+
+        <!-- Work Message Template Configuration -->
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <h3 style="margin:0">工作消息字段配置</h3>
+            <button class="btn btn-secondary" onclick="resetMessageTemplate()">恢复默认</button>
+          </div>
+          <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">自定义工作区消息表单字段，支持文本输入和文件上传。</p>
+
+          <div id="message-template-fields" style="margin-bottom:16px;">
+            <!-- Fields will be rendered here -->
+            <p class="meta" style="font-size:13px">加载中...</p>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-bottom:16px;padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border);">
+            <input type="text" id="new-field-name" placeholder="字段标识(英文)" style="width:150px">
+            <input type="text" id="new-field-label" placeholder="显示名称" style="width:150px">
+            <select id="new-field-type" style="width:120px">
+              <option value="text">单行文本</option>
+              <option value="textarea">多行文本</option>
+              <option value="file">文件上传</option>
+              <option value="select">下拉选择</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:4px;font-size:13px;">
+              <input type="checkbox" id="new-field-required" style="width:16px;height:16px;"> 必填
+            </label>
+            <button class="btn btn-primary" onclick="addMessageTemplateField()" style="margin-left:auto;">+ 添加字段</button>
+          </div>
+        </div>
+
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
           <h3>环境变量</h3>
           <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">在构建和终端中自动注入的环境变量。每行一个，格式 KEY=VALUE。</p>
           <textarea id="proj-env" placeholder="例如：\nNODE_ENV=production\nAPI_BASE_URL=https://api.example.com" style="width:100%;min-height:160px;font-family:monospace"></textarea>
         </div>
-        <div class="card">
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
           <h3>Claude Code Settings</h3>
           <p class="meta" style="margin-bottom:10px;color:var(--text-muted);font-size:13px">为该项目配置 Claude Code CLI 的 settings.json。调用 Claude 时会自动通过 --settings 加载。</p>
           <textarea id="proj-claude-settings" placeholder='例如：\n{\n  "allowedTools": ["Read", "Edit", "Bash"],\n  "model": "claude-sonnet-4-6"\n}' style="width:100%;min-height:280px;font-family:monospace"></textarea>
         </div>
-        <div class="card">
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <h3 style="margin:0">项目技能绑定</h3>
             <button class="btn btn-secondary" onclick="showSkillsManager()">管理技能库</button>
@@ -609,7 +696,7 @@
             <p class="meta" style="font-size:13px">加载中...</p>
           </div>
         </div>
-        <div class="form-row" style="justify-content:flex-end">
+        <div class="form-row" style="justify-content:flex-end;max-width:1400px;margin-left:auto;margin-right:auto">
           <button class="btn btn-primary" onclick="saveProjectSettings()">保存设置</button>
         </div>
       </div>
@@ -650,7 +737,7 @@
 
   <!-- Skills Manager Modal -->
   <div id="skills-modal" class="modal-overlay" onclick="if(event.target===this)closeSkillsModal()">
-    <div class="modal" style="max-width:1200px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+    <div class="modal" style="max-width:1400px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
       <div class="modal-header">
         <h3 style="margin:0">技能库管理</h3>
         <button class="btn btn-ghost" onclick="closeSkillsModal()" style="padding:4px 10px">关闭</button>
@@ -719,7 +806,7 @@
 
   <!-- Project Links & Network Modal -->
   <div id="project-network-modal" class="modal-overlay" onclick="if(event.target===this)closeProjectNetworkModal()">
-    <div class="modal" style="max-width:1200px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+    <div class="modal" style="max-width:1400px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
       <div class="modal-header">
         <h3 style="margin:0">项目协作网络</h3>
         <button class="btn btn-ghost" onclick="closeProjectNetworkModal()" style="padding:4px 10px">关闭</button>
@@ -855,6 +942,83 @@
           <div class="form-row" style="justify-content:flex-end">
             <button class="btn btn-primary" onclick="replyToMessage()">发送回复</button>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DB Connection Modal -->
+  <div id="db-connection-modal" class="modal-overlay" onclick="if(event.target===this)closeDbConnectionModal()">
+    <div class="modal" style="max-width:600px">
+      <div class="modal-header">
+        <h3 style="margin:0">新建数据库连接</h3>
+        <button class="btn btn-ghost" onclick="closeDbConnectionModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px">
+        <input type="hidden" id="db-conn-id">
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">连接名称</label>
+          <input id="db-conn-name" placeholder="例如: 生产数据库" style="width:100%">
+        </div>
+        <div class="form-row" style="gap:12px;margin-bottom:16px">
+          <div style="flex:2">
+            <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">主机</label>
+            <input id="db-conn-host" placeholder="localhost" value="localhost" style="width:100%">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">端口</label>
+            <input id="db-conn-port" type="number" placeholder="3306" value="3306" style="width:100%">
+          </div>
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">数据库</label>
+          <input id="db-conn-database" placeholder="数据库名称 (可选)" style="width:100%">
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">用户名</label>
+          <input id="db-conn-username" placeholder="root" style="width:100%">
+        </div>
+        <div class="form-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-bottom:16px">
+          <label style="font-size:13px;font-weight:500">密码</label>
+          <input id="db-conn-password" type="password" placeholder="数据库密码" style="width:100%">
+        </div>
+        <div id="db-conn-error" style="color:#dc2626;font-size:13px;margin-bottom:12px;display:none"></div>
+        <div class="form-row" style="justify-content:flex-end;gap:8px">
+          <button class="btn btn-ghost" onclick="testDbConnection()">测试连接</button>
+          <button class="btn btn-primary" onclick="saveDbConnection()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DB Table Structure Modal -->
+  <div id="db-table-modal" class="modal-overlay" onclick="if(event.target===this)closeDbTableModal()">
+    <div class="modal" style="max-width:800px;max-height:90vh;overflow:auto">
+      <div class="modal-header">
+        <h3 style="margin:0" id="db-table-modal-title">表结构</h3>
+        <button class="btn btn-ghost" onclick="closeDbTableModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="padding:16px">
+        <div id="db-table-info" style="margin-bottom:16px;padding:12px;background:var(--surface);border-radius:8px;font-size:13px">
+          <!-- Table info -->
+        </div>
+        <h4 style="margin:0 0 12px 0">字段</h4>
+        <div style="overflow:auto;max-height:400px;border:1px solid var(--border);border-radius:8px">
+          <table id="db-table-columns" style="font-size:12px;width:100%">
+            <thead>
+              <tr><th>字段</th><th>类型</th><th>允许空</th><th>键</th><th>默认值</th><th>额外</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <h4 style="margin:16px 0 12px 0">索引</h4>
+        <div style="overflow:auto;max-height:200px;border:1px solid var(--border);border-radius:8px">
+          <table id="db-table-indexes" style="font-size:12px;width:100%">
+            <thead>
+              <tr><th>名称</th><th>字段</th><th>类型</th><th>唯一</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </div>

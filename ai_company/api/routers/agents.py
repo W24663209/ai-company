@@ -5,6 +5,7 @@ from ai_company.core.exceptions import AICompanyError
 from ai_company.core.models import AgentMessage, AgentPresence
 from ai_company.services import claude_service, worklog_service
 from ai_company.services.shared_dir_service import shared_dir_service
+from datetime import datetime
 import json
 import asyncio
 
@@ -106,8 +107,41 @@ def register_presence(presence: AgentPresence):
 
 
 @router.get("/presence")
-def list_presence():
-    return shared_dir_service.list_presence()
+def list_presence(project_id: str = ""):
+    agents = shared_dir_service.list_presence()
+    if project_id:
+        agents = [a for a in agents if a.project_id == project_id or not a.project_id]
+    return agents
+
+
+@router.post("/presence/register-default")
+def register_default_agents(project_id: str = ""):
+    """Register default agents (PM, etc.) for a project"""
+    default_agents = [
+        AgentPresence(
+            agent_name="PM (项目经理)",
+            project_id=project_id,
+            status="idle",
+            updated_at=datetime.utcnow()
+        ),
+        AgentPresence(
+            agent_name="CodeReviewer (代码审核)",
+            project_id=project_id,
+            status="idle",
+            updated_at=datetime.utcnow()
+        ),
+        AgentPresence(
+            agent_name="Architect (架构师)",
+            project_id=project_id,
+            status="idle",
+            updated_at=datetime.utcnow()
+        )
+    ]
+
+    for agent in default_agents:
+        shared_dir_service.register_presence(agent)
+
+    return {"registered": len(default_agents), "agents": [a.agent_name for a in default_agents]}
 
 
 @router.websocket("/ws/chat/{project_id}/{requirement_id}")

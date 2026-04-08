@@ -310,3 +310,66 @@ def clone_repository(
     if job["status"] == "failed":
         raise AICompanyError(job.get("error", "git clone failed"))
     return {"path": str(target_path), "status": job["status"], "stdout": job.get("stdout", ""), "stderr": job.get("stderr", "")}
+
+
+def get_working_diff(project_id: str) -> dict:
+    """Get git diff of working directory changes."""
+    from ai_company.services.project_service import get_project
+
+    project = get_project(project_id)
+    if not project:
+        raise AICompanyError("Project not found")
+
+    env = get_ssh_env()
+
+    try:
+        # Get git diff
+        result = subprocess.run(
+            ["git", "diff", "--stat"],
+            cwd=str(project.path),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        diff_stat = result.stdout.strip() if result.returncode == 0 else ""
+
+        # Get detailed diff
+        result_detail = subprocess.run(
+            ["git", "diff"],
+            cwd=str(project.path),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        diff_content = result_detail.stdout if result_detail.returncode == 0 else ""
+
+        # Get list of changed files
+        files = []
+        if diff_stat:
+            for line in diff_stat.split('\n'):
+                if '|' in line:
+                    filename = line.split('|')[0].strip()
+                    if filename:
+                        files.append(filename)
+
+        # Get untracked files
+        result_untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=str(project.path),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        untracked = result_untracked.stdout.strip().split('\n') if result_untracked.returncode == 0 and result_untracked.stdout.strip() else []
+
+        return {
+            "diff": diff_content,
+            "stat": diff_stat,
+            "files": files,
+            "untracked": untracked,
+            "has_changes": bool(diff_content or untracked),
+        }
+    except Exception as e:
+        raise AICompanyError(f"Failed to get git diff: {e}")

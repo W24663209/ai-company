@@ -6,6 +6,59 @@ let currentReqs = [];
 let activeChatReqId = null;
 let chatHistories = {}; // reqId -> [{role, text}]
 let chatLoadingState = {}; // reqId -> boolean
+let chatFiles = {}; // reqId -> [File]
+let currentCodeChanges = {}; // reqId -> {diff: string, files: []}
+
+// Load and display code changes for the requirement
+async function loadCodeChangesForReq(reqId) {
+  if (!currentProject) return;
+  try {
+    const result = await api('GET', `/git/diff?project_id=${currentProject.id}`);
+    if (result && result.has_changes) {
+      currentCodeChanges[reqId] = result;
+    } else {
+      delete currentCodeChanges[reqId];
+    }
+    // Re-render to show changes
+    if (activeChatReqId === reqId) {
+      loadReqs();
+    }
+  } catch (e) {
+    console.log('No code changes or error:', e);
+    delete currentCodeChanges[reqId];
+  }
+}
+
+// Clear code changes display
+function clearCodeChanges(reqId) {
+  delete currentCodeChanges[reqId];
+  loadReqs();
+}
+
+// Audio notification for Claude completion
+function playCompletionSound() {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    // Pleasant chime sound (C5-E5-G5)
+    oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime);
+    oscillator.frequency.setValueAtTime(659.25, audioContext.currentTime + 0.1);
+    oscillator.frequency.setValueAtTime(783.99, audioContext.currentTime + 0.2);
+
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.5);
+  } catch (e) {
+    console.log('Audio notification not available:', e);
+  }
+}
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -140,6 +193,8 @@ async function loadReqs() {
   }
   try {
     currentReqs = await api('GET', '/requirements/' + currentProject.id);
+    // Sort by created_at descending (newest first)
+    currentReqs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   } catch (e) {
     currentReqs = [];
   }
@@ -151,12 +206,12 @@ async function loadReqs() {
   currentReqs.forEach(r => {
     html += `
       <tr class="chat-row">
-        <td style="padding-left:24px">${r.id}</td>
-        <td>${r.title}</td>
-        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${r.description || '-'}</td>
-        <td><span class="tag status-${r.status}">${r.status}</span></td>
-        <td style="width:90px">${r.priority}</td>
-        <td class="actions" style="padding-right:24px;width:200px">
+        <td style="padding-left:24px;width:60px">${r.id}</td>
+        <td style="width:25%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.title}</td>
+        <td style="width:35%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.description || '-'}</td>
+        <td style="width:80px"><span class="tag status-${r.status}">${r.status}</span></td>
+        <td style="width:70px">${r.priority}</td>
+        <td class="actions" style="padding-right:24px;width:180px;text-align:right">
           <div style="display:flex;gap:6px;flex-wrap:nowrap;justify-content:flex-end">
             ${r.status !== 'done' ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px" onclick="event.stopPropagation();updateReq('${r.id}', '${r.status === 'pending' ? 'in_progress' : 'done'}')">${r.status === 'pending' ? '开始' : '完成'}</button>` : '<span style="color:var(--text-muted);font-size:12px">已完成</span>'}
             <button class="btn btn-primary" style="padding:4px 10px;font-size:12px" onclick="event.stopPropagation();toggleChat('${r.id}')">工作</button>
@@ -186,9 +241,10 @@ function renderChatRow(reqId) {
           </div>
         `;
       }
+      const label = h.role === 'claude' ? 'Claude' : '你';
       return `
         <div class="chat-bubble ${h.role === 'claude' ? 'claude' : 'user'}">
-          <div class="label">${h.role === 'claude' ? 'Claude' : '你'}</div>
+          <div class="label">${label}</div>
           <div class="text">${escapeHtml(h.text)}</div>
         </div>
       `;
@@ -200,31 +256,81 @@ function renderChatRow(reqId) {
       <div class="loading-dots"><span></span><span></span><span></span></div>
     </div>
   ` : '';
+
+  // Build code changes display
+  const codeChanges = currentCodeChanges[reqId];
+  const codeChangesPanel = codeChanges ? `
+    <div id="code-changes-${reqId}" style="border-top:1px solid var(--border);background:#f8fafc;">
+      <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:#e2e8f0;">
+        <strong style="font-size:13px;color:#475569">📄 当前代码修改 (${codeChanges.files.length} 个文件)</strong>
+        <button class="btn btn-ghost" onclick="clearCodeChanges('${reqId}')" style="padding:2px 8px;font-size:12px">隐藏</button>
+      </div>
+      <pre style="margin:0;padding:12px;font-size:11px;line-height:1.4;max-height:150px;overflow:auto;background:#fff;font-family:monospace;color:#334155">${escapeHtml(codeChanges.stat || '无统计信息')}</pre>
+    </div>
+  ` : '';
+
   return `
     <tr class="chat-panel-row">
       <td colspan="6" style="padding:0;border-bottom:none">
-        <div class="chat-area" style="border-radius:0;border-left:none;border-right:none;border-bottom:none;max-width:800px;margin:0 auto">
+        <div class="chat-area" style="border-radius:0;border-left:none;border-right:none;border-bottom:none;width:100%;position:relative;" id="chat-area-${reqId}" ondragover="handleChatDragOver(event, '${reqId}')" ondragleave="handleChatDragLeave(event, '${reqId}')" ondrop="handleChatDrop(event, '${reqId}')">
           <div class="chat-header">
-            <strong>需求工作区</strong>
+            <strong>💻 开发工作区</strong>
             <div style="display:flex;gap:8px;align-items:center">
               <button class="btn btn-secondary" onclick="showCollaborationModal('${reqId}')" style="font-size:12px;padding:4px 10px">协作消息</button>
               <button class="btn btn-ghost" onclick="closeChat()">收起</button>
             </div>
           </div>
+
+          ${currentProject?.agent_roles ? `
+          <div style="padding:10px 16px;background:#fef3c7;border-bottom:1px solid #f59e0b;font-size:12px;color:#92400e;max-height:80px;overflow-y:auto;"
+               title="在 设置 标签页可以修改智能体工作职责">
+            <strong>🎭 智能体工作职责:</strong>
+            <div style="margin-top:4px;white-space:pre-wrap;">${escapeHtml(currentProject.agent_roles)}</div>
+          </div>
+          ` : ''}
+
+          <!-- Active Agents Panel -->
+          <div id="active-agents-${reqId}" style="border-bottom:1px solid var(--border);background:#f0fdf4;max-height:100px;overflow-y:auto;display:none;">
+            <div style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:#dcfce7;">
+              <strong style="font-size:12px;color:#166534">🎭 在线智能体</strong>
+              <div style="display:flex;gap:4px;">
+                <button class="btn btn-ghost" onclick="registerDefaultAgents()" style="padding:2px 6px;font-size:11px;">初始化</button>
+                <button class="btn btn-ghost" onclick="refreshAgentPresence('${reqId}')" style="padding:2px 6px;font-size:11px;">刷新</button>
+              </div>
+            </div>
+            <div id="active-agents-list-${reqId}" style="padding:6px 12px;display:flex;flex-wrap:wrap;gap:6px;">
+            </div>
+          </div>
+
+          <!-- Agent Messages Panel -->
+          <div id="agent-messages-${reqId}" style="border-bottom:1px solid var(--border);background:#fafafa;max-height:200px;overflow-y:auto;">
+            <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:#f1f5f9;">
+              <strong style="font-size:12px;color:#475569">🤖 智能体工作消息</strong>
+              <span class="meta" style="font-size:11px" id="agent-msg-count-${reqId}">加载中...</span>
+            </div>
+            <div id="agent-messages-list-${reqId}" style="padding:8px 12px;">
+              <p class="meta" style="font-size:12px;color:var(--text-muted)">暂无智能体消息</p>
+            </div>
+          </div>
+
           <div id="chat-history-${reqId}" class="chat-messages">
             ${bubbles}
             ${loadingBubble}
           </div>
+          ${codeChangesPanel}
           <div id="chat-files-${reqId}" class="chat-files-list" style="display:none;padding:8px 12px;background:#f8f9fa;border-top:1px solid var(--border);max-height:100px;overflow-y:auto;"></div>
           <div class="ws-status" id="ws-status-${reqId}" style="display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px;color:#666;background:#f8f9fa;border-top:1px solid var(--border);">
             <span class="ws-dot" id="ws-dot-${reqId}" style="width:8px;height:8px;border-radius:50%;background:#ccc;"></span>
             <span class="ws-text" id="ws-text-${reqId}">未连接</span>
           </div>
           <div class="chat-input-wrapper">
-            <textarea id="chat-input-${reqId}" class="chat-input" placeholder="输入你要告诉 Claude 的内容，按 Enter 发送"></textarea>
+            <div id="work-message-form-${reqId}" style="flex:1;min-width:0;">
+              <!-- Dynamic form will be rendered here based on template -->
+              <textarea id="chat-input-${reqId}" class="chat-input" placeholder="输入你要告诉 Claude 的内容，按 Enter 发送，或粘贴/拖拽文件上传" onpaste="handleChatPaste(event, '${reqId}')"></textarea>
+            </div>
             <input type="file" id="chat-file-${reqId}" style="display:none" onchange="handleChatFileSelect('${reqId}')" multiple>
-            <button class="btn btn-ghost" onclick="document.getElementById('chat-file-${reqId}').click()" title="上传文件">📎</button>
-            <button class="btn btn-primary" id="chat-send-btn-${reqId}" onclick="sendChat('${reqId}')">发送</button>
+            <button class="btn btn-ghost" onclick="document.getElementById('chat-file-${reqId}').click()" title="上传文件" style="padding:8px">📎</button>
+            <button class="btn btn-primary" id="chat-send-btn-${reqId}" onclick="sendWorkMessage('${reqId}')" style="padding:8px 16px">发送</button>
           </div>
         </div>
       </td>
@@ -267,14 +373,22 @@ async function toggleChat(reqId) {
   if (!wasOpen) {
     await loadWorklog(reqId);
     await loadCollabMessagesForReq(reqId);
+    await loadCodeChangesForReq(reqId);
   }
   loadReqs();
+
+  // Multiple scroll attempts to ensure DOM is fully rendered
+  const scrollAttempts = [100, 300, 600];
+  scrollAttempts.forEach((delay, index) => {
+    setTimeout(() => {
+      scrollChatToBottom(reqId, index === scrollAttempts.length - 1);
+    }, delay);
+  });
+
   setTimeout(() => {
     const el = document.getElementById(`chat-input-${reqId}`);
     if (el) el.focus();
-    // Auto scroll to bottom (latest message)
-    scrollChatToBottom(reqId);
-  }, 50);
+  }, 100);
 }
 
 async function loadCollabMessagesForReq(reqId) {
@@ -553,6 +667,7 @@ async function sendChat(reqId) {
         scrollChatToBottom(reqId);
         setChatControlsEnabled(reqId, true);
         saveWorklog(reqId);
+        playCompletionSound();
         ws.close();
         resolve();
       } else if (data.type === 'error') {
@@ -584,6 +699,7 @@ async function sendChat(reqId) {
         scrollChatToBottom(reqId);
         setChatControlsEnabled(reqId, true);
         saveWorklog(reqId);
+        playCompletionSound();
         updateWsStatus(reqId, 'idle');
         resolve();
       } else if (reconnectAttempts < maxReconnectAttempts) {
@@ -674,6 +790,7 @@ async function sendChat(reqId) {
                 appendChatBubble(reqId, 'claude', displayText);
                 scrollChatToBottom(reqId);
                 saveWorklog(reqId);
+                playCompletionSound();
               }
             } catch (e) {}
           }
@@ -698,9 +815,14 @@ async function sendChat(reqId) {
   }
 }
 
-function scrollChatToBottom(reqId) {
+function scrollChatToBottom(reqId, smooth = false) {
   const container = document.getElementById(`chat-history-${reqId}`);
-  if (container) container.scrollTop = container.scrollHeight;
+  if (container) {
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: smooth ? 'smooth' : 'auto'
+    });
+  }
 }
 
 function setChatControlsEnabled(reqId, enabled) {
@@ -752,7 +874,6 @@ function updateWsStatus(reqId, status, reconnectAttempt = 0) {
 }
 
 // Handle file selection for chat
-let chatFiles = {}; // reqId -> [files]
 
 function handleChatFileSelect(reqId) {
   const fileInput = document.getElementById(`chat-file-${reqId}`);
@@ -1624,22 +1745,37 @@ function setSharedAceEditorContent(content, editable, filename) {
 
 async function loadSharedTree(path) {
   try {
-    const data = await api('GET', `/files/shared?path=${encodeURIComponent(path)}`);
-    if (data.type === 'directory') {
+    const url = `/files/shared?path=${encodeURIComponent(path)}`;
+    console.log('[DEBUG] Loading shared tree from:', url);
+    const data = await api('GET', url);
+    console.log('[DEBUG] Shared tree response:', JSON.stringify(data));
+    console.log('[DEBUG] Response type:', typeof data, 'data.type:', data?.type, 'data.items:', data?.items);
+    if (data && data.type === 'directory' && Array.isArray(data.items)) {
+      console.log('[DEBUG] Rendering', data.items.length, 'items');
       renderSharedTreeItems(data.items, path);
+    } else {
+      console.error('[DEBUG] Shared tree response format invalid:', data);
+      toast('加载共享目录失败: 响应格式错误 - 期望 type=directory');
     }
   } catch (e) {
+    console.error('[DEBUG] 加载共享目录失败:', e);
     toast('加载共享目录失败: ' + e.message);
   }
 }
 
 function renderSharedTreeItems(items, parentPath) {
+  console.log('[DEBUG] Rendering shared tree items:', items?.length || 0, 'items, parentPath:', parentPath);
   const container = document.getElementById('shared-tree');
-  if (!container) return;
+  if (!container) {
+    console.error('[DEBUG] Shared tree container not found!');
+    return;
+  }
   if (!items || !items.length) {
+    console.log('[DEBUG] No items to render, showing empty state');
     container.innerHTML = '<div class="empty" style="padding:20px 0">空目录</div>';
     return;
   }
+  console.log('[DEBUG] Building HTML for', items.length, 'items');
   let html = '<div style="display:flex;flex-direction:column;gap:2px">';
   items.forEach(item => {
     const icon = getFileIcon(item.is_dir, item.name);
@@ -2871,7 +3007,7 @@ async function sendCollabMessage() {
       fullText: `[协作消息已发送给 ${targetName}]\n主题: ${subject}\n内容: ${content}`,
       msgId: Date.now().toString()
     });
-    renderReqs();
+    loadReqs();
   } catch (e) {
     errorEl.textContent = '发送失败: ' + e.message;
     errorEl.style.display = 'block';
@@ -3058,4 +3194,1890 @@ async function manualReconnect() {
       setChatControlsEnabled(reqId, true);
     }
   }
+}
+// ============================================
+// Database Management
+// ============================================
+
+let dbConnections = [];
+let currentDbConnection = null;
+let currentDbDatabase = '';
+let currentDbTable = '';
+
+// Load database connections
+async function loadDbConnections() {
+  try {
+    dbConnections = await api('GET', '/db/connections?project_id=' + (currentProject?.id || ''));
+    renderDbConnections();
+  } catch (e) {
+    console.error('Failed to load DB connections:', e);
+    dbConnections = [];
+    renderDbConnections();
+  }
+}
+
+function renderDbConnections() {
+  const container = document.getElementById('db-connections-list');
+  if (!container) return;
+
+  if (!dbConnections.length) {
+    container.innerHTML = '<p class="meta" style="font-size:13px">暂无数据库连接，点击"新建连接"添加</p>';
+    return;
+  }
+
+  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  dbConnections.forEach(conn => {
+    html += `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:500;font-size:14px;margin-bottom:4px">${escapeHtml(conn.name)}</div>
+          <div class="meta" style="font-size:12px;color:var(--text-muted)">
+            ${conn.host}:${conn.port}/${conn.database || '(no db)'} · ${escapeHtml(conn.username)}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-secondary" onclick="selectDbConnection('${conn.id}')" style="padding:4px 10px;font-size:12px">连接</button>
+          <button class="btn btn-ghost" onclick="testDbConnectionById('${conn.id}')" style="padding:4px 10px;font-size:12px">测试</button>
+          <button class="btn btn-ghost" onclick="deleteDbConnection('${conn.id}')" style="padding:4px 10px;font-size:12px;color:#dc2626">删除</button>
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// Show create DB connection modal
+function showCreateDbConnectionModal() {
+  document.getElementById('db-conn-id').value = '';
+  document.getElementById('db-conn-name').value = '';
+  document.getElementById('db-conn-host').value = 'localhost';
+  document.getElementById('db-conn-port').value = '3306';
+  document.getElementById('db-conn-database').value = '';
+  document.getElementById('db-conn-username').value = '';
+  document.getElementById('db-conn-password').value = '';
+  document.getElementById('db-conn-error').style.display = 'none';
+  document.getElementById('db-connection-modal').classList.add('show');
+}
+
+function closeDbConnectionModal() {
+  document.getElementById('db-connection-modal').classList.remove('show');
+}
+
+// Save DB connection
+async function saveDbConnection() {
+  const id = document.getElementById('db-conn-id').value;
+  const name = document.getElementById('db-conn-name').value.trim();
+  const host = document.getElementById('db-conn-host').value.trim() || 'localhost';
+  const port = parseInt(document.getElementById('db-conn-port').value) || 3306;
+  const database = document.getElementById('db-conn-database').value.trim();
+  const username = document.getElementById('db-conn-username').value.trim();
+  const password = document.getElementById('db-conn-password').value;
+
+  const errorEl = document.getElementById('db-conn-error');
+
+  if (!name) {
+    errorEl.textContent = '请输入连接名称';
+    errorEl.style.display = 'block';
+    return;
+  }
+  if (!username) {
+    errorEl.textContent = '请输入用户名';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const body = {
+      name, host, port, database, username, password,
+      project_id: currentProject?.id || null
+    };
+
+    if (id) {
+      await api('PATCH', '/db/connections/' + id, body);
+    } else {
+      await api('POST', '/db/connections', body);
+    }
+
+    closeDbConnectionModal();
+    await loadDbConnections();
+    toast('连接已保存');
+  } catch (e) {
+    errorEl.textContent = e.message;
+    errorEl.style.display = 'block';
+  }
+}
+
+// Test DB connection
+async function testDbConnection() {
+  const host = document.getElementById('db-conn-host').value.trim() || 'localhost';
+  const port = parseInt(document.getElementById('db-conn-port').value) || 3306;
+  const database = document.getElementById('db-conn-database').value.trim();
+  const username = document.getElementById('db-conn-username').value.trim();
+  const password = document.getElementById('db-conn-password').value;
+  const errorEl = document.getElementById('db-conn-error');
+
+  if (!username) {
+    errorEl.textContent = '请输入用户名';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const body = {
+      name: 'temp',
+      host, port, database, username, password,
+      project_id: currentProject?.id || null
+    };
+    const result = await api('POST', '/db/connections', body);
+    await api('DELETE', '/db/connections/' + result.id);
+    errorEl.textContent = '连接成功！';
+    errorEl.style.color = '#16a34a';
+    errorEl.style.display = 'block';
+    setTimeout(() => {
+      errorEl.style.display = 'none';
+      errorEl.style.color = '#dc2626';
+    }, 2000);
+  } catch (e) {
+    errorEl.textContent = '连接失败: ' + e.message;
+    errorEl.style.display = 'block';
+  }
+}
+
+async function testDbConnectionById(connId) {
+  try {
+    const result = await api('POST', '/db/connections/' + connId + '/test');
+    if (result.success) {
+      toast(`连接成功！MySQL ${result.version}`);
+    } else {
+      toast('连接失败: ' + result.message);
+    }
+  } catch (e) {
+    toast('测试失败: ' + e.message);
+  }
+}
+
+// Delete DB connection
+async function deleteDbConnection(connId) {
+  if (!confirm('确定要删除这个连接吗？')) return;
+  try {
+    await api('DELETE', '/db/connections/' + connId);
+    if (currentDbConnection === connId) {
+      currentDbConnection = null;
+      currentDbDatabase = '';
+      document.getElementById('db-query-panel').classList.add('hidden');
+    }
+    await loadDbConnections();
+    toast('连接已删除');
+  } catch (e) {
+    toast('删除失败: ' + e.message);
+  }
+}
+
+// Select DB connection for querying
+async function selectDbConnection(connId) {
+  currentDbConnection = connId;
+  const conn = dbConnections.find(c => c.id === connId);
+  if (!conn) return;
+
+  document.getElementById('db-current-connection').textContent = `当前连接: ${conn.name} (${conn.host}:${conn.port})`;
+  document.getElementById('db-query-panel').classList.remove('hidden');
+
+  await loadDbDatabases();
+
+  if (conn.database) {
+    currentDbDatabase = conn.database;
+    document.getElementById('db-database-select').value = conn.database;
+    await loadDbTables();
+  }
+}
+
+// Load databases for current connection
+async function loadDbDatabases() {
+  if (!currentDbConnection) return;
+
+  try {
+    const databases = await api('GET', '/db/connections/' + currentDbConnection + '/databases');
+    const select = document.getElementById('db-database-select');
+    let html = '<option value="">选择数据库...</option>';
+    databases.forEach(db => {
+      if (db !== 'information_schema' && db !== 'mysql' && db !== 'performance_schema' && db !== 'sys') {
+        html += `<option value="${escapeHtml(db)}" ${db === currentDbDatabase ? 'selected' : ''}>${escapeHtml(db)}</option>`;
+      }
+    });
+    select.innerHTML = html;
+  } catch (e) {
+    console.error('Failed to load databases:', e);
+  }
+}
+
+function onDbDatabaseChange() {
+  currentDbDatabase = document.getElementById('db-database-select').value;
+  loadDbTables();
+}
+
+// Load tables for current database
+async function loadDbTables() {
+  if (!currentDbConnection || !currentDbDatabase) {
+    document.getElementById('db-tables-list').innerHTML = '<p class="meta" style="font-size:13px">请选择数据库</p>';
+    return;
+  }
+
+  try {
+    const tables = await api('GET', '/db/connections/' + currentDbConnection + '/tables?database=' + encodeURIComponent(currentDbDatabase));
+    renderDbTables(tables);
+  } catch (e) {
+    document.getElementById('db-tables-list').innerHTML = '<p class="meta" style="font-size:13px;color:#dc2626">加载失败: ' + escapeHtml(e.message) + '</p>';
+  }
+}
+
+async function refreshDbTables() {
+  await loadDbTables();
+  toast('表列表已刷新');
+}
+
+function renderDbTables(tables) {
+  const container = document.getElementById('db-tables-list');
+  if (!tables || !tables.length) {
+    container.innerHTML = '<p class="meta" style="font-size:13px">数据库为空</p>';
+    return;
+  }
+
+  let html = '<div style="display:flex;flex-direction:column;gap:4px">';
+  tables.forEach(table => {
+    html += `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer;background:var(--surface)"
+           onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background='var(--surface)'"
+           onclick="showDbTableStructure('${table.name}')"
+           title="点击查看表结构">
+        <span style="font-size:13px">${escapeHtml(table.name)}</span>
+        <button class="btn btn-ghost" style="padding:2px 6px;font-size:11px" onclick="event.stopPropagation();generateSelectSql('${table.name}')"
+                title="生成 SELECT 语句">SELECT</button>
+      </div>
+    `;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// Generate SELECT SQL for a table
+function generateSelectSql(tableName) {
+  const sql = `SELECT * FROM \`${tableName}\` LIMIT 100;`;
+  document.getElementById('db-sql-input').value = sql;
+}
+
+// Show table structure modal
+async function showDbTableStructure(tableName) {
+  currentDbTable = tableName;
+  document.getElementById('db-table-modal-title').textContent = '表结构: ' + tableName;
+
+  try {
+    const info = await api('GET', `/db/connections/${currentDbConnection}/tables/${tableName}?database=${encodeURIComponent(currentDbDatabase)}`);
+
+    const infoHtml = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <span><strong>引擎:</strong> ${escapeHtml(info.engine || 'Unknown')}</span>
+        <span><strong>行数:</strong> ${info.row_count || 'Unknown'}</span>
+        <span><strong>字符集:</strong> ${escapeHtml(info.charset || 'Unknown')}</span>
+      </div>
+    `;
+    document.getElementById('db-table-info').innerHTML = infoHtml;
+
+    const columnsHtml = info.columns.map(col => `
+      <tr>
+        <td style="padding:8px;border-bottom:1px solid var(--border);font-weight:500">${escapeHtml(col.Field)}</td>
+        <td style="padding:8px;border-bottom:1px solid var(--border)">${escapeHtml(col.Type)}</td>
+        <td style="padding:8px;border-bottom:1px solid var(--border)">${col.Null === 'YES' ? '是' : '否'}</td>
+        <td style="padding:8px;border-bottom:1px solid var(--border)">${escapeHtml(col.Key || '-')}</td>
+        <td style="padding:8px;border-bottom:1px solid var(--border)">${escapeHtml(col.Default !== null ? col.Default : 'NULL')}</td>
+        <td style="padding:8px;border-bottom:1px solid var(--border)">${escapeHtml(col.Extra || '-')}</td>
+      </tr>
+    `).join('');
+    document.getElementById('db-table-columns').querySelector('tbody').innerHTML = columnsHtml;
+
+    if (info.indexes && info.indexes.length) {
+      const indexGroups = {};
+      info.indexes.forEach(idx => {
+        if (!indexGroups[idx.Key_name]) {
+          indexGroups[idx.Key_name] = { unique: !idx.Non_unique, columns: [] };
+        }
+        indexGroups[idx.Key_name].columns.push(idx.Column_name);
+      });
+
+      const indexesHtml = Object.entries(indexGroups).map(([name, data]) => `
+        <tr>
+          <td style="padding:8px;border-bottom:1px solid var(--border)">${escapeHtml(name)}</td>
+          <td style="padding:8px;border-bottom:1px solid var(--border)">${escapeHtml(data.columns.join(', '))}</td>
+          <td style="padding:8px;border-bottom:1px solid var(--border)">${data.unique ? 'BTREE' : 'BTREE'}</td>
+          <td style="padding:8px;border-bottom:1px solid var(--border)">${data.unique ? '是' : '否'}</td>
+        </tr>
+      `).join('');
+      document.getElementById('db-table-indexes').querySelector('tbody').innerHTML = indexesHtml;
+    } else {
+      document.getElementById('db-table-indexes').querySelector('tbody').innerHTML = '<tr><td colspan="4" style="padding:8px;text-align:center">无索引</td></tr>';
+    }
+
+    document.getElementById('db-table-modal').classList.add('show');
+  } catch (e) {
+    toast('加载表结构失败: ' + e.message);
+  }
+}
+
+function closeDbTableModal() {
+  document.getElementById('db-table-modal').classList.remove('show');
+}
+
+// Execute SQL query
+async function executeDbQuery() {
+  const sql = document.getElementById('db-sql-input').value.trim();
+  if (!sql) {
+    toast('请输入 SQL 查询');
+    return;
+  }
+  if (!currentDbConnection) {
+    toast('请先选择数据库连接');
+    return;
+  }
+
+  const statusEl = document.getElementById('db-query-status');
+  const resultsTable = document.getElementById('db-query-results');
+
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = '<span style="color:var(--text-muted)">执行中...</span>';
+
+  try {
+    const result = await api('POST', '/db/connections/' + currentDbConnection + '/query', { sql, limit: 1000 });
+
+    statusEl.innerHTML = `
+      <span style="color:#16a34a">✓</span>
+      ${result.row_count} 行,
+      ${result.execution_time_ms}ms
+    `;
+
+    if (result.columns && result.columns.length) {
+      const headerHtml = result.columns.map(col => `<th style="padding:8px;border-bottom:2px solid var(--border);white-space:nowrap;font-weight:600">${escapeHtml(col)}</th>`).join('');
+      resultsTable.querySelector('thead').innerHTML = '<tr>' + headerHtml + '</tr>';
+
+      const rowsHtml = result.rows.map(row => {
+        const cells = result.columns.map(col => {
+          const val = row[col];
+          const display = val === null ? '<span style="color:var(--text-muted);font-style:italic">NULL</span>' : escapeHtml(String(val));
+          return `<td style="padding:8px;border-bottom:1px solid var(--border);max-width:300px;overflow:hidden;text-overflow:ellipsis">${display}</td>`;
+        }).join('');
+        return '<tr>' + cells + '</tr>';
+      }).join('');
+      resultsTable.querySelector('tbody').innerHTML = rowsHtml;
+    } else {
+      resultsTable.querySelector('thead').innerHTML = '<tr><th>查询成功 (无返回数据)</th></tr>';
+      resultsTable.querySelector('tbody').innerHTML = '';
+    }
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:#dc2626">✗ ${escapeHtml(e.message)}</span>`;
+    resultsTable.querySelector('thead').innerHTML = '<tr><th>查询失败</th></tr>';
+    resultsTable.querySelector('tbody').innerHTML = '';
+  }
+}
+
+// Update showProjectTab to include database tab
+const originalShowProjectTab = showProjectTab;
+showProjectTab = function(name) {
+  if (name === 'database') {
+    loadDbConnections();
+  }
+  return originalShowProjectTab(name);
+};
+// ============================================
+// Agent Messages - Display AI agent communications
+// ============================================
+
+// Load agent messages for a requirement
+async function loadAgentMessages(reqId) {
+  if (!currentProject) return;
+
+  const container = document.getElementById(`agent-messages-list-${reqId}`);
+  const countEl = document.getElementById(`agent-msg-count-${reqId}`);
+
+  if (!container || !countEl) return;
+
+  try {
+    const messages = await api('GET', `/agents/messages?project_id=${currentProject.id}&requirement_id=${reqId}&limit=50`);
+
+    countEl.textContent = `${messages.length} 条消息`;
+
+    if (!messages || !messages.length) {
+      container.innerHTML = '<p class="meta" style="font-size:12px;color:var(--text-muted)">暂无智能体消息</p>';
+      return;
+    }
+
+    // Sort by created_at ascending (oldest first)
+    messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    let html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+
+    messages.forEach(msg => {
+      const typeColors = {
+        review: { bg: '#fef3c7', border: '#f59e0b', icon: '🔍' },
+        communication: { bg: '#dbeafe', border: '#3b82f6', icon: '💬' },
+        decision: { bg: '#d1fae5', border: '#10b981', icon: '✓' },
+        alert: { bg: '#fee2e2', border: '#ef4444', icon: '⚠️' },
+        summary: { bg: '#f3e8ff', border: '#a855f7', icon: '📝' }
+      };
+
+      const style = typeColors[msg.message_type] || typeColors.communication;
+      const time = new Date(msg.created_at).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+      html += `
+        <div style="padding:10px 12px;background:${style.bg};border:1px solid ${style.border};border-radius:8px;font-size:12px;"
+             onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span>${style.icon}</span>
+              <strong style="color:#374151">${escapeHtml(msg.sender)}</strong>
+              ${msg.receiver ? `<span style="color:#6b7280">→ ${escapeHtml(msg.receiver)}</span>` : ''}
+            </div>
+            <span style="color:#9ca3af;font-size:11px">${time}</span>
+          </div>
+          <div style="font-weight:500;color:#1f2937;margin-bottom:4px;">${escapeHtml(msg.subject)}</div>
+          <div style="color:#4b5563;white-space:pre-wrap;line-height:1.5;">${escapeHtml(msg.content)}</div>
+          ${renderAgentMessageContext(msg)}
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+
+    // Scroll to bottom to show latest
+    const panel = document.getElementById(`agent-messages-${reqId}`);
+    if (panel) panel.scrollTop = panel.scrollHeight;
+
+  } catch (e) {
+    console.error('Failed to load agent messages:', e);
+    container.innerHTML = '<p class="meta" style="font-size:12px;color:#dc2626">加载失败: ' + escapeHtml(e.message) + '</p>';
+  }
+}
+
+// Render context (files, issues, etc.)
+function renderAgentMessageContext(msg) {
+  if (!msg.context || Object.keys(msg.context).length === 0) return '';
+
+  let html = '';
+
+  // Files reviewed
+  if (msg.context.files_reviewed && msg.context.files_reviewed.length) {
+    html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.1);">';
+    html += '<span style="color:#6b7280;font-size:11px;">审核文件:</span> ';
+    html += msg.context.files_reviewed.map(f => `<span style="background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;font-size:11px;">${escapeHtml(f)}</span>`).join(' ');
+    html += '</div>';
+  }
+
+  // Verdict
+  if (msg.context.verdict) {
+    const verdictColors = {
+      approved: { bg: '#d1fae5', color: '#065f46' },
+      needs_fix: { bg: '#fef3c7', color: '#92400e' },
+      rejected: { bg: '#fee2e2', color: '#991b1b' }
+    };
+    const v = verdictColors[msg.context.verdict] || verdictColors.needs_fix;
+    html += `<div style="margin-top:6px;display:inline-block;padding:3px 10px;background:${v.bg};color:${v.color};border-radius:4px;font-size:11px;font-weight:500;">`;
+    html += msg.context.verdict === 'approved' ? '✓ 审核通过' :
+            msg.context.verdict === 'rejected' ? '✗ 审核未通过' : '⚠ 需要修改';
+    html += '</div>';
+  }
+
+  // Issues found
+  if (msg.context.issues_found && msg.context.issues_found.length) {
+    html += '<div style="margin-top:8px;padding:8px;background:rgba(239,68,68,0.05);border-radius:6px;">';
+    html += '<div style="color:#991b1b;font-size:11px;font-weight:500;margin-bottom:4px;">发现的问题:</div>';
+    html += '<ul style="margin:0;padding-left:16px;color:#7f1d1d;font-size:11px;">';
+    msg.context.issues_found.forEach(issue => {
+      html += `<li>${escapeHtml(issue.description || JSON.stringify(issue))}</li>`;
+    });
+    html += '</ul></div>';
+  }
+
+  // Related files
+  if (msg.context.related_files && msg.context.related_files.length) {
+    html += '<div style="margin-top:8px;">';
+    html += '<span style="color:#6b7280;font-size:11px;">相关文件:</span> ';
+    html += msg.context.related_files.map(f => `<span style="font-size:11px;color:#4b5563;">${escapeHtml(f)}</span>`).join(', ');
+    html += '</div>';
+  }
+
+  return html;
+}
+
+// Create a review message programmatically (for testing/demo)
+async function createAgentReviewMessage(reqId, reviewData) {
+  if (!currentProject) return;
+
+  try {
+    await api('POST', '/agents/messages/review', {
+      project_id: currentProject.id,
+      requirement_id: reqId,
+      reviewer: reviewData.reviewer || 'PM Agent',
+      subject: reviewData.subject || '代码审核报告',
+      review_content: reviewData.content,
+      files_reviewed: reviewData.files || [],
+      issues_found: reviewData.issues || [],
+      verdict: reviewData.verdict || 'needs_fix'
+    });
+
+    // Reload messages
+    await loadAgentMessages(reqId);
+  } catch (e) {
+    console.error('Failed to create review message:', e);
+  }
+}
+
+// Poll for new agent messages
+let agentMessageIntervals = {};
+
+function startAgentMessagePolling(reqId) {
+  // Stop existing polling
+  if (agentMessageIntervals[reqId]) {
+    clearInterval(agentMessageIntervals[reqId]);
+  }
+
+  // Load immediately
+  loadAgentMessages(reqId);
+
+  // Poll every 10 seconds
+  agentMessageIntervals[reqId] = setInterval(() => {
+    if (activeChatReqId === reqId) {
+      loadAgentMessages(reqId);
+    }
+  }, 10000);
+}
+
+function stopAgentMessagePolling(reqId) {
+  if (agentMessageIntervals[reqId]) {
+    clearInterval(agentMessageIntervals[reqId]);
+    delete agentMessageIntervals[reqId];
+  }
+}
+
+// Hook into toggleChat to load agent messages
+const originalToggleChat = toggleChat;
+toggleChat = async function(reqId) {
+  const wasOpen = activeChatReqId === reqId;
+
+  // Call original
+  const result = await originalToggleChat(reqId);
+
+  // Start or stop polling
+  if (!wasOpen) {
+    startAgentMessagePolling(reqId);
+  } else {
+    stopAgentMessagePolling(reqId);
+  }
+
+  return result;
+};
+
+// Also load on initial render
+const originalRenderChatRow = renderChatRow;
+renderChatRow = function(reqId) {
+  // Start polling when chat row is rendered open
+  if (activeChatReqId === reqId) {
+    startAgentMessagePolling(reqId);
+  }
+  return originalRenderChatRow(reqId);
+};
+// ============================================
+// SQL Editor with Ace Editor and Smart Hints
+// ============================================
+
+let dbSqlEditor = null;
+let dbTableCompletions = [];
+
+function initDbSqlEditor() {
+  if (dbSqlEditor || !window.ace) return;
+
+  const editorDiv = document.getElementById('db-sql-editor');
+  if (!editorDiv) return;
+
+  dbSqlEditor = ace.edit('db-sql-editor');
+  dbSqlEditor.setTheme('ace/theme/chrome');
+  dbSqlEditor.session.setMode('ace/mode/mysql');
+
+  dbSqlEditor.setOptions({
+    enableBasicAutocompletion: true,
+    enableLiveAutocompletion: true,
+    enableSnippets: true,
+    showPrintMargin: false,
+    highlightActiveLine: true,
+    highlightGutterLine: true,
+    fontSize: 13,
+    fontFamily: '"SF Mono", Monaco, "Cascadia Code", monospace',
+    minLines: 5,
+    maxLines: 20,
+  });
+
+  const mysqlKeywords = [
+    'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'EXISTS',
+    'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'CREATE', 'TABLE',
+    'DROP', 'ALTER', 'INDEX', 'VIEW', 'DATABASE', 'SHOW', 'DESCRIBE', 'DESC',
+    'EXPLAIN', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'ON', 'AS',
+    'ORDER', 'BY', 'ASC', 'DESC', 'LIMIT', 'OFFSET', 'GROUP', 'HAVING',
+    'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'DISTINCT', 'LIKE', 'BETWEEN',
+    'UNION', 'ALL', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+    'IF', 'IFNULL', 'COALESCE', 'CAST', 'CONVERT',
+    'NOW', 'CURDATE', 'CURTIME', 'DATE_FORMAT', 'STR_TO_DATE',
+    'CONCAT', 'SUBSTRING', 'LENGTH', 'TRIM', 'UPPER', 'LOWER',
+    'ABS', 'ROUND', 'CEILING', 'FLOOR', 'MOD',
+    'AUTO_INCREMENT', 'PRIMARY', 'KEY', 'UNIQUE', 'FOREIGN', 'REFERENCES',
+    'DEFAULT', 'COMMENT', 'ENGINE', 'CHARSET', 'COLLATE'
+  ];
+
+  const sqlSnippets = [
+    { caption: 'SELECT', snippet: 'SELECT * FROM ${1:table} WHERE ${2:condition};', meta: 'snippet' },
+    { caption: 'SELECT COUNT', snippet: 'SELECT COUNT(*) FROM ${1:table};', meta: 'snippet' },
+    { caption: 'INSERT', snippet: 'INSERT INTO ${1:table} (${2:columns}) VALUES (${3:values});', meta: 'snippet' },
+    { caption: 'UPDATE', snippet: 'UPDATE ${1:table} SET ${2:column} = ${3:value} WHERE ${4:condition};', meta: 'snippet' },
+    { caption: 'DELETE', snippet: 'DELETE FROM ${1:table} WHERE ${2:condition};', meta: 'snippet' },
+    { caption: 'JOIN', snippet: 'SELECT * FROM ${1:table1} t1 JOIN ${2:table2} t2 ON t1.${3:col} = t2.${4:col};', meta: 'snippet' },
+    { caption: 'LEFT JOIN', snippet: 'SELECT * FROM ${1:table1} t1 LEFT JOIN ${2:table2} t2 ON t1.${3:col} = t2.${4:col};', meta: 'snippet' },
+    { caption: 'GROUP BY', snippet: 'SELECT ${1:col}, COUNT(*) FROM ${2:table} GROUP BY ${1:col};', meta: 'snippet' },
+    { caption: 'ORDER BY', snippet: 'SELECT * FROM ${1:table} ORDER BY ${2:col} DESC;', meta: 'snippet' },
+    { caption: 'LIMIT', snippet: 'SELECT * FROM ${1:table} LIMIT ${2:10};', meta: 'snippet' },
+    { caption: 'CREATE TABLE', snippet: 'CREATE TABLE ${1:table} (\n  id INT PRIMARY KEY AUTO_INCREMENT,\n  ${2:name} VARCHAR(255),\n  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);', meta: 'snippet' },
+    { caption: 'ALTER TABLE', snippet: 'ALTER TABLE ${1:table} ADD COLUMN ${2:column} ${3:TYPE};', meta: 'snippet' },
+    { caption: 'CREATE INDEX', snippet: 'CREATE INDEX idx_${1:name} ON ${2:table}(${3:column});', meta: 'snippet' },
+    { caption: 'DROP TABLE', snippet: 'DROP TABLE IF EXISTS ${1:table};', meta: 'snippet' },
+    { caption: 'SHOW TABLES', snippet: 'SHOW TABLES;', meta: 'snippet' },
+    { caption: 'DESCRIBE', snippet: 'DESCRIBE ${1:table};', meta: 'snippet' },
+    { caption: 'EXPLAIN', snippet: 'EXPLAIN SELECT * FROM ${1:table};', meta: 'snippet' },
+  ];
+
+  const customCompleter = {
+    getCompletions: function(editor, session, pos, prefix, callback) {
+      const completions = [];
+
+      mysqlKeywords.forEach(kw => {
+        completions.push({
+          caption: kw,
+          value: kw,
+          meta: 'keyword',
+          score: 100
+        });
+      });
+
+      sqlSnippets.forEach(s => {
+        completions.push({
+          caption: s.caption,
+          snippet: s.snippet,
+          meta: s.meta,
+          score: 90
+        });
+      });
+
+      dbTableCompletions.forEach(item => {
+        completions.push({
+          caption: item.name,
+          value: item.name,
+          meta: item.type,
+          score: 80,
+          docText: item.doc || ''
+        });
+      });
+
+      callback(null, completions);
+    }
+  };
+
+  const langTools = ace.require('ace/ext/language_tools');
+  if (langTools) {
+    langTools.addCompleter(customCompleter);
+  }
+
+  dbSqlEditor.commands.addCommand({
+    name: 'executeQuery',
+    bindKey: { win: 'Ctrl-Enter', mac: 'Cmd-Enter' },
+    exec: function(editor) {
+      executeDbQuery();
+    }
+  });
+
+  dbSqlEditor.commands.addCommand({
+    name: 'formatQuery',
+    bindKey: { win: 'Ctrl-Shift-F', mac: 'Cmd-Shift-F' },
+    exec: function(editor) {
+      formatSqlQuery();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    if (dbSqlEditor) dbSqlEditor.resize();
+  });
+}
+
+async function updateDbCompletions() {
+  if (!currentDbConnection || !currentDbDatabase) {
+    dbTableCompletions = [];
+    return;
+  }
+
+  try {
+    const completions = [];
+    const tables = await api('GET', `/db/connections/${currentDbConnection}/tables?database=${encodeURIComponent(currentDbDatabase)}`);
+
+    tables.forEach(t => {
+      completions.push({
+        name: t.name,
+        type: 'table',
+        doc: `Table: ${t.name}`
+      });
+
+      api('GET', `/db/connections/${currentDbConnection}/tables/${t.name}?database=${encodeURIComponent(currentDbDatabase)}`)
+        .then(info => {
+          if (info.columns) {
+            info.columns.forEach(col => {
+              completions.push({
+                name: `${t.name}.${col.Field}`,
+                type: 'column',
+                doc: `${t.name}.${col.Field} - ${col.Type}${col.Key === 'PRI' ? ' (PK)' : ''}${col.Key === 'MUL' ? ' (Index)' : ''}`
+              });
+              if (!completions.find(c => c.name === col.Field)) {
+                completions.push({
+                  name: col.Field,
+                  type: 'column',
+                  doc: `Column: ${col.Field} (${col.Type})`
+                });
+              }
+            });
+            dbTableCompletions = completions;
+          }
+        })
+        .catch(() => {});
+    });
+
+    dbTableCompletions = completions;
+  } catch (e) {
+    console.error('Failed to update completions:', e);
+  }
+}
+
+function formatSqlQuery() {
+  if (!dbSqlEditor) return;
+
+  let sql = dbSqlEditor.getValue();
+  const keywords = ['SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'OUTER JOIN', 'ON', 'INSERT INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE FROM'];
+
+  sql = sql.replace(/\s+/g, ' ').trim();
+
+  keywords.forEach(kw => {
+    const regex = new RegExp(`\\s*\\b${kw}\\b`, 'gi');
+    sql = sql.replace(regex, `\n${kw}`);
+  });
+
+  const lines = sql.split('\n');
+  let inSelect = false;
+  const formatted = lines.map((line, i) => {
+    const trimmed = line.trim();
+    if (!trimmed) return '';
+
+    if (trimmed.match(/^SELECT\b/i)) {
+      inSelect = true;
+      return trimmed;
+    }
+    if (trimmed.match(/^(FROM|WHERE|GROUP BY|HAVING|ORDER BY|LIMIT|JOIN|LEFT|RIGHT|INNER|OUTER)\b/i)) {
+      inSelect = false;
+      return trimmed;
+    }
+    if (inSelect && trimmed.match(/^\w+\s*,?$/)) {
+      return '    ' + trimmed;
+    }
+    return trimmed;
+  }).filter(l => l).join('\n');
+
+  dbSqlEditor.setValue(formatted, -1);
+  dbSqlEditor.clearSelection();
+}
+
+const originalExecuteDbQuery = executeDbQuery;
+executeDbQuery = async function() {
+  if (!dbSqlEditor) {
+    return originalExecuteDbQuery();
+  }
+
+  const sql = dbSqlEditor.getValue().trim();
+  if (!sql) {
+    toast('请输入 SQL 查询');
+    return;
+  }
+  if (!currentDbConnection) {
+    toast('请先选择数据库连接');
+    return;
+  }
+
+  const statusEl = document.getElementById('db-query-status');
+  const resultsTable = document.getElementById('db-query-results');
+
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = '<span style="color:var(--text-muted)">执行中...</span>';
+
+  try {
+    const result = await api('POST', '/db/connections/' + currentDbConnection + '/query', { sql, limit: 1000 });
+
+    statusEl.innerHTML = `
+      <span style="color:#16a34a">✓</span>
+      ${result.row_count} 行,
+      ${result.execution_time_ms}ms
+    `;
+
+    if (result.columns && result.columns.length) {
+      const headerHtml = result.columns.map(col => `<th style="padding:8px;border-bottom:2px solid var(--border);white-space:nowrap;font-weight:600">${escapeHtml(col)}</th>`).join('');
+      resultsTable.querySelector('thead').innerHTML = '<tr>' + headerHtml + '</tr>';
+
+      const rowsHtml = result.rows.map(row => {
+        const cells = result.columns.map(col => {
+          const val = row[col];
+          const display = val === null ? '<span style="color:var(--text-muted);font-style:italic">NULL</span>' : escapeHtml(String(val));
+          return `<td style="padding:8px;border-bottom:1px solid var(--border);max-width:300px;overflow:hidden;text-overflow:ellipsis">${display}</td>`;
+        }).join('');
+        return '<tr>' + cells + '</tr>';
+      }).join('');
+      resultsTable.querySelector('tbody').innerHTML = rowsHtml;
+    } else {
+      resultsTable.querySelector('thead').innerHTML = '<tr><th>查询成功 (无返回数据)</th></tr>';
+      resultsTable.querySelector('tbody').innerHTML = '';
+    }
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:#dc2626">✗ ${escapeHtml(e.message)}</span>`;
+    resultsTable.querySelector('thead').innerHTML = '<tr><th>查询失败</th></tr>';
+    resultsTable.querySelector('tbody').innerHTML = '';
+  }
+};
+
+const originalGenerateSelectSql = generateSelectSql;
+generateSelectSql = function(tableName) {
+  if (!dbSqlEditor) {
+    const sql = `SELECT * FROM \`${tableName}\` LIMIT 100;`;
+    alert('SQL: ' + sql + '\n\n(编辑器尚未初始化)');
+    return;
+  }
+  const sql = `SELECT * FROM \`${tableName}\` LIMIT 100;`;
+  dbSqlEditor.setValue(sql, -1);
+  dbSqlEditor.focus();
+  dbSqlEditor.clearSelection();
+};
+
+const originalSelectDbConnection = selectDbConnection;
+selectDbConnection = async function(connId) {
+  await originalSelectDbConnection(connId);
+  setTimeout(() => {
+    initDbSqlEditor();
+    updateDbCompletions();
+  }, 100);
+};
+
+const originalOnDbDatabaseChange = onDbDatabaseChange;
+onDbDatabaseChange = function() {
+  originalOnDbDatabaseChange();
+  updateDbCompletions();
+};
+
+const originalRenderDbTables = renderDbTables;
+renderDbTables = function(tables) {
+  originalRenderDbTables(tables);
+  updateDbCompletions();
+};
+
+// ============================================
+// Chat File Upload - Drag & Drop + Paste
+// ============================================
+
+// Drag over handler - show visual feedback
+function handleChatDragOver(e, reqId) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const chatArea = document.getElementById(`chat-area-${reqId}`);
+  if (chatArea && !chatArea.classList.contains('drag-over')) {
+    chatArea.classList.add('drag-over');
+    chatArea.style.border = '2px dashed var(--primary)';
+    chatArea.style.background = 'rgba(99, 102, 241, 0.05)';
+
+    // Add drop indicator if not exists
+    let indicator = document.getElementById(`drop-indicator-${reqId}`);
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.id = `drop-indicator-${reqId}`;
+      indicator.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--primary);
+        color: white;
+        padding: 20px 40px;
+        border-radius: 12px;
+        font-size: 16px;
+        font-weight: 500;
+        z-index: 100;
+        pointer-events: none;
+        box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+      `;
+      indicator.innerHTML = '📁 释放文件以上传';
+      chatArea.appendChild(indicator);
+    }
+  }
+}
+
+// Drag leave handler - remove visual feedback
+function handleChatDragLeave(e, reqId) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const chatArea = document.getElementById(`chat-area-${reqId}`);
+  if (chatArea) {
+    const rect = chatArea.getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      chatArea.classList.remove('drag-over');
+      chatArea.style.border = '';
+      chatArea.style.background = '';
+
+      const indicator = document.getElementById(`drop-indicator-${reqId}`);
+      if (indicator) {
+        indicator.remove();
+      }
+    }
+  }
+}
+
+// Drop handler - process dropped files
+function handleChatDrop(e, reqId) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const chatArea = document.getElementById(`chat-area-${reqId}`);
+  if (chatArea) {
+    chatArea.classList.remove('drag-over');
+    chatArea.style.border = '';
+    chatArea.style.background = '';
+
+    const indicator = document.getElementById(`drop-indicator-${reqId}`);
+    if (indicator) {
+      indicator.remove();
+    }
+  }
+
+  const files = e.dataTransfer.files;
+  if (files && files.length > 0) {
+    addFilesToChat(reqId, files);
+  }
+}
+
+// Paste handler - process pasted files or images
+function handleChatPaste(e, reqId) {
+  const items = e.clipboardData.items;
+  const files = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file) {
+        if (file.name === 'image.png' || file.name === '') {
+          const ext = item.type.split('/')[1] || 'png';
+          const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+          const newFile = new File([file], `pasted-image-${timestamp}.${ext}`, { type: file.type });
+          files.push(newFile);
+        } else {
+          files.push(file);
+        }
+      }
+    }
+  }
+
+  if (files.length > 0) {
+    e.preventDefault();
+    addFilesToChat(reqId, files);
+    toast(`已粘贴 ${files.length} 个文件`);
+  }
+}
+
+// Add files to chat
+function addFilesToChat(reqId, files) {
+  chatFiles[reqId] = chatFiles[reqId] || [];
+
+  for (const file of files) {
+    chatFiles[reqId].push(file);
+  }
+
+  updateChatFileList(reqId);
+  toast(`已添加 ${files.length} 个文件，共 ${chatFiles[reqId].length} 个`);
+}
+
+// Enhanced updateChatFileList with better preview
+const originalUpdateChatFileList = updateChatFileList;
+updateChatFileList = function(reqId) {
+  const filesList = document.getElementById(`chat-files-${reqId}`);
+  const files = chatFiles[reqId] || [];
+
+  if (files.length === 0) {
+    filesList.style.display = 'none';
+    filesList.innerHTML = '';
+    return;
+  }
+
+  filesList.style.display = 'block';
+  filesList.innerHTML = files.map((file, index) => {
+    let icon = '📄';
+    if (file.type.startsWith('image/')) icon = '🖼️';
+    else if (file.type.startsWith('text/') || file.name.match(/\.(txt|md|js|ts|jsx|tsx|py|java|go|rs|c|cpp|h|html|css|json|yaml|yml|sql)$/i)) icon = '📝';
+    else if (file.type.startsWith('video/')) icon = '🎬';
+    else if (file.type.startsWith('audio/')) icon = '🎵';
+    else if (file.name.match(/\.(zip|rar|7z|tar|gz)$/i)) icon = '📦';
+
+    let preview = '';
+    if (file.type.startsWith('image/') && file.size < 5 * 1024 * 1024) {
+      const url = URL.createObjectURL(file);
+      preview = `<img src="${url}" style="max-width:60px;max-height:60px;border-radius:4px;margin-right:8px;object-fit:cover;" />`;
+    }
+
+    return `
+      <div style="display:flex;align-items:center;padding:6px 0;font-size:13px;border-bottom:1px solid var(--border);" onmouseenter="this.style.background='rgba(0,0,0,0.02)'" onmouseleave="this.style.background=''">
+        ${preview}
+        <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:8px;">
+          ${icon} ${file.name} <span style="color:var(--text-muted);">(${formatFileSize(file.size)})</span>
+        </span>
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px;flex-shrink:0;" onclick="removeChatFile('${reqId}', ${index})" title="删除">
+          ✕
+        </button>
+      </div>
+    `;
+  }).join('');
+};
+
+// ============================================
+// Project Message Template Management
+// ============================================
+
+let currentMessageTemplate = { fields: [] };
+
+// Load message template for current project
+async function loadMessageTemplate() {
+  if (!currentProject) return;
+
+  try {
+    const template = await api('GET', `/messages/templates/${currentProject.id}`);
+    // Ensure template has valid fields array
+    if (template && Array.isArray(template.fields) && template.fields.length > 0) {
+      currentMessageTemplate = template;
+    } else {
+      // Use default if API returns empty template
+      currentMessageTemplate = { fields: getDefaultMessageFields() };
+    }
+    renderMessageTemplateFields();
+    // Re-render work message form if chat is open
+    if (activeChatReqId) {
+      renderWorkMessageForm(activeChatReqId);
+    }
+  } catch (e) {
+    console.error('Failed to load message template:', e);
+    currentMessageTemplate = { fields: getDefaultMessageFields() };
+    renderMessageTemplateFields();
+    // Re-render work message form if chat is open
+    if (activeChatReqId) {
+      renderWorkMessageForm(activeChatReqId);
+    }
+  }
+}
+
+function getDefaultMessageFields() {
+  return [
+    {
+      name: 'docking_doc',
+      label: '对接文档',
+      type: 'file',
+      required: false,
+      placeholder: '上传对接文档或从共享文档选择',
+      options: []
+    },
+    {
+      name: 'shared_docs',
+      label: '共享文档',
+      type: 'file',
+      required: false,
+      placeholder: '从共享目录选择文档',
+      options: []
+    },
+    {
+      name: 'route_id',
+      label: '路由ID',
+      type: 'text',
+      required: false,
+      placeholder: '例如: /api/users',
+      options: []
+    },
+    {
+      name: 'requirement',
+      label: '需求',
+      type: 'textarea',
+      required: true,
+      placeholder: '描述具体需求...',
+      options: []
+    }
+  ];
+}
+
+function renderMessageTemplateFields() {
+  const container = document.getElementById('message-template-fields');
+  if (!container) return;
+
+  const fields = currentMessageTemplate.fields || [];
+
+  if (fields.length === 0) {
+    container.innerHTML = '<p class="meta" style="font-size:13px;color:var(--text-muted)">暂无字段配置</p>';
+    return;
+  }
+
+  let html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+
+  fields.forEach((field, index) => {
+    const typeLabels = {
+      text: '单行文本',
+      textarea: '多行文本',
+      file: '文件上传',
+      select: '下拉选择',
+      number: '数字'
+    };
+
+    html += `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;"
+           onmouseenter="this.style.background='var(--surface-hover)'" onmouseleave="this.style.background='var(--surface)'">
+        <div style="flex:0 0 30px;text-align:center;color:var(--text-muted);font-size:12px;">${index + 1}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:500;font-size:14px;color:var(--text);">${escapeHtml(field.label)}</div>
+          <div style="font-size:12px;color:var(--text-muted);">
+            ${escapeHtml(field.name)} · ${typeLabels[field.type] || field.type} ${field.required ? '· 必填' : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-ghost" onclick="moveMessageTemplateField(${index}, -1)" ${index === 0 ? 'disabled' : ''} style="padding:4px 8px;font-size:12px;">↑</button>
+          <button class="btn btn-ghost" onclick="moveMessageTemplateField(${index}, 1)" ${index === fields.length - 1 ? 'disabled' : ''} style="padding:4px 8px;font-size:12px;">↓</button>
+          <button class="btn btn-ghost" onclick="deleteMessageTemplateField(${index})" style="padding:4px 8px;font-size:12px;color:#dc2626;">删除</button>
+        </div>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function addMessageTemplateField() {
+  const nameInput = document.getElementById('new-field-name');
+  const labelInput = document.getElementById('new-field-label');
+  const typeSelect = document.getElementById('new-field-type');
+  const requiredCheckbox = document.getElementById('new-field-required');
+
+  const name = nameInput.value.trim();
+  const label = labelInput.value.trim();
+  const type = typeSelect.value;
+  const required = requiredCheckbox.checked;
+
+  if (!name || !label) {
+    toast('请输入字段标识和显示名称');
+    return;
+  }
+
+  // Validate name (only alphanumeric and underscore)
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    toast('字段标识只能包含字母、数字和下划线，且不能以数字开头');
+    return;
+  }
+
+  // Check for duplicate names
+  if (currentMessageTemplate.fields.some(f => f.name === name)) {
+    toast('字段标识已存在');
+    return;
+  }
+
+  currentMessageTemplate.fields.push({
+    name,
+    label,
+    type,
+    required,
+    placeholder: '',
+    options: type === 'select' ? ['选项1', '选项2'] : []
+  });
+
+  // Clear inputs
+  nameInput.value = '';
+  labelInput.value = '';
+  typeSelect.value = 'text';
+  requiredCheckbox.checked = false;
+
+  renderMessageTemplateFields();
+  saveMessageTemplate();
+}
+
+function deleteMessageTemplateField(index) {
+  if (!confirm('确定要删除这个字段吗？')) return;
+  currentMessageTemplate.fields.splice(index, 1);
+  renderMessageTemplateFields();
+  saveMessageTemplate();
+}
+
+function moveMessageTemplateField(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= currentMessageTemplate.fields.length) return;
+
+  const temp = currentMessageTemplate.fields[index];
+  currentMessageTemplate.fields[index] = currentMessageTemplate.fields[newIndex];
+  currentMessageTemplate.fields[newIndex] = temp;
+
+  renderMessageTemplateFields();
+  saveMessageTemplate();
+}
+
+async function saveMessageTemplate() {
+  if (!currentProject) return;
+
+  try {
+    await api('PUT', `/messages/templates/${currentProject.id}`, {
+      fields: currentMessageTemplate.fields
+    });
+    toast('消息字段配置已保存');
+    // Re-render work message form if chat is open
+    if (activeChatReqId) {
+      renderWorkMessageForm(activeChatReqId);
+    }
+  } catch (e) {
+    toast('保存失败: ' + e.message);
+  }
+}
+
+function resetMessageTemplate() {
+  if (!confirm('确定要恢复默认配置吗？当前配置将被覆盖。')) return;
+
+  currentMessageTemplate.fields = getDefaultMessageFields();
+  renderMessageTemplateFields();
+  saveMessageTemplate();
+  // Re-render work message form if chat is open
+  if (activeChatReqId) {
+    renderWorkMessageForm(activeChatReqId);
+  }
+}
+
+// Hook into loadProjectSettings to also load message template
+const originalLoadProjectSettings = loadProjectSettings;
+loadProjectSettings = async function() {
+  await originalLoadProjectSettings();
+  await loadMessageTemplate();
+};
+
+// ============================================
+// Dynamic Work Message Form based on Template
+// ============================================
+
+let currentWorkMessageData = {}; // Store form data
+let currentWorkMessageFiles = {}; // Store files for each field
+
+// Render work message form based on template
+function renderWorkMessageForm(reqId) {
+  const container = document.getElementById(`work-message-form-${reqId}`);
+  if (!container) {
+    console.log('renderWorkMessageForm: container not found for reqId', reqId);
+    return;
+  }
+
+  // Get template fields - ensure we have the latest
+  let fields = (currentMessageTemplate && currentMessageTemplate.fields) || [];
+
+  // Use default fields if empty
+  if (fields.length === 0) {
+    fields = getDefaultMessageFields();
+    currentMessageTemplate = { fields: fields };
+    console.log('renderWorkMessageForm: using default fields', fields.length);
+  }
+
+  console.log('renderWorkMessageForm: rendering', fields.length, 'fields for reqId', reqId);
+
+  // Build form based on template
+  let html = '<div style="display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;">';
+
+  fields.forEach(field => {
+    const value = currentWorkMessageData[field.name] || '';
+    const requiredAttr = field.required ? 'required' : '';
+    const placeholder = field.placeholder || '';
+
+    html += `<div style="display:flex;flex-direction:column;gap:4px;">`;
+    html += `<label style="font-size:13px;font-weight:500;color:var(--text);">${escapeHtml(field.label)}${field.required ? '<span style="color:#dc2626;">*</span>' : ''}</label>`;
+
+    switch (field.type) {
+      case 'text':
+        html += `<input type="text" id="work-field-${reqId}-${field.name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" ${requiredAttr} onchange="updateWorkMessageData('${field.name}', this.value)" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;">`;
+        break;
+
+      case 'textarea':
+        html += `<textarea id="work-field-${reqId}-${field.name}" placeholder="${escapeHtml(placeholder)}" ${requiredAttr} onchange="updateWorkMessageData('${field.name}', this.value)" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;min-height:80px;resize:vertical;">${escapeHtml(value)}</textarea>`;
+        break;
+
+      case 'number':
+        html += `<input type="number" id="work-field-${reqId}-${field.name}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" ${requiredAttr} onchange="updateWorkMessageData('${field.name}', this.value)" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;">`;
+        break;
+
+      case 'select':
+        html += `<select id="work-field-${reqId}-${field.name}" ${requiredAttr} onchange="updateWorkMessageData('${field.name}', this.value)" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);">`;
+        html += `<option value="">请选择...</option>`;
+        (field.options || []).forEach(opt => {
+          const selected = value === opt ? 'selected' : '';
+          html += `<option value="${escapeHtml(opt)}" ${selected}>${escapeHtml(opt)}</option>`;
+        });
+        html += `</select>`;
+        break;
+
+      case 'file': {
+        const files = currentWorkMessageFiles[field.name] || [];
+        const sharedContent = currentWorkMessageData[field.name] || '';
+        html += `<div style="display:flex;flex-direction:column;gap:8px;">`;
+        html += `<input type="file" id="work-field-${reqId}-${field.name}-input" style="display:none;" onchange="handleWorkMessageFileSelect('${reqId}', '${field.name}', this.files)">`;
+        html += `<div style="display:flex;gap:8px;">`;
+        html += `<button type="button" class="btn btn-secondary" onclick="document.getElementById('work-field-${reqId}-${field.name}-input').click()" style="align-self:flex-start;padding:6px 12px;font-size:12px;">📎 选择文件</button>`;
+        html += `<button type="button" class="btn btn-secondary" onclick="showSharedDocSelector('${field.name.replace(/'/g, "\\'")}', '${reqId.replace(/'/g, "\\'")}')" style="padding:6px 12px;font-size:12px;">📂 从共享文档选择</button>`;
+        html += `</div>`;
+
+        if (files.length > 0) {
+          html += `<div style="display:flex;flex-wrap:wrap;gap:6px;">`;
+          files.forEach((file, idx) => {
+            html += `<span style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:11px;">`;
+            html += `📄 ${escapeHtml(file.name)} (${formatFileSize(file.size)})`;
+            html += `<button type="button" onclick="removeWorkMessageFile('${field.name}', ${idx})" style="background:none;border:none;cursor:pointer;padding:0 2px;color:#dc2626;">✕</button>`;
+            html += `</span>`;
+          });
+          html += `</div>`;
+        }
+
+        // Show shared docs content if any
+        if (sharedContent) {
+          const sharedDocNames = sharedContent.split('\n\n').map(block => block.split(':')[0]).filter(n => n);
+          if (sharedDocNames.length > 0) {
+            html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">`;
+            html += `<span style="font-size:11px;color:var(--text-muted);">已选共享文档:</span>`;
+            sharedDocNames.forEach(name => {
+              html += `<span style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:4px;font-size:11px;">`;
+              html += `📄 ${escapeHtml(name)}`;
+              html += `</span>`;
+            });
+            html += `</div>`;
+          }
+        }
+
+        html += `</div>`;
+        break;
+      }
+    }
+
+    html += `</div>`;
+  });
+
+  html += '</div>';
+  // Add hidden textarea for sendWorkMessage to use
+  html += `<textarea id="chat-input-${reqId}" style="display:none;"></textarea>`;
+  container.innerHTML = html;
+}
+
+// Update form data when field changes
+function updateWorkMessageData(fieldName, value) {
+  currentWorkMessageData[fieldName] = value;
+}
+
+// Handle file selection for work message
+function handleWorkMessageFileSelect(reqId, fieldName, files) {
+  if (!files || files.length === 0) return;
+
+  currentWorkMessageFiles[fieldName] = currentWorkMessageFiles[fieldName] || [];
+  for (const file of files) {
+    currentWorkMessageFiles[fieldName].push(file);
+  }
+
+  // Re-render to show files
+  renderWorkMessageForm(reqId);
+}
+
+// Remove file from work message
+function removeWorkMessageFile(fieldName, index) {
+  if (currentWorkMessageFiles[fieldName]) {
+    currentWorkMessageFiles[fieldName].splice(index, 1);
+    const reqId = activeChatReqId;
+    if (reqId) renderWorkMessageForm(reqId);
+  }
+}
+
+// Compose message from form data
+function composeWorkMessage() {
+  let fields = (currentMessageTemplate && currentMessageTemplate.fields) || [];
+  // Use default fields if empty
+  if (fields.length === 0) {
+    fields = getDefaultMessageFields();
+  }
+
+  let message = '';
+  fields.forEach(field => {
+    const value = currentWorkMessageData[field.name];
+    const files = currentWorkMessageFiles[field.name] || [];
+
+    if (field.type === 'file') {
+      // Add local files info
+      if (files.length > 0) {
+        message += `${field.label} (本地文件):\n`;
+        files.forEach(f => {
+          message += `- ${f.name} (${formatFileSize(f.size)})\n`;
+        });
+        message += '\n';
+      }
+      // Add shared docs content
+      if (value && value.includes('```')) {
+        message += `${field.label} (共享文档):\n${value}\n\n`;
+      }
+    } else if (value) {
+      message += `${field.label}: ${value}\n\n`;
+    }
+  });
+
+  return message.trim();
+}
+
+// Clear work message form
+function clearWorkMessageForm() {
+  currentWorkMessageData = {};
+  currentWorkMessageFiles = {};
+}
+
+// Check if form is valid
+function isWorkMessageFormValid() {
+  let fields = (currentMessageTemplate && currentMessageTemplate.fields) || [];
+  // Use default fields if empty
+  if (fields.length === 0) {
+    fields = getDefaultMessageFields();
+  }
+
+  return fields.every(field => {
+    if (!field.required) return true;
+
+    if (field.type === 'file') {
+      const files = currentWorkMessageFiles[field.name] || [];
+      return files.length > 0;
+    } else {
+      const value = currentWorkMessageData[field.name];
+      return value && value.trim() !== '';
+    }
+  });
+}
+
+// Hook into toggleChat to render form
+const originalToggleChatForTemplate = toggleChat;
+toggleChat = async function(reqId) {
+  const wasOpen = activeChatReqId === reqId;
+
+  // Call original first (this creates the DOM)
+  const result = await originalToggleChatForTemplate(reqId);
+
+  // Load template and render form if opening
+  if (!wasOpen) {
+    // Always reload template to get latest config
+    await loadMessageTemplate();
+    // Wait for DOM to be fully ready using multiple checks
+    const tryRender = (attempts = 0) => {
+      const container = document.getElementById(`work-message-form-${reqId}`);
+      if (container) {
+        renderWorkMessageForm(reqId);
+        loadAgentPresence(reqId);
+      } else if (attempts < 50) {
+        // Try again in 10ms, up to 500ms total
+        setTimeout(() => tryRender(attempts + 1), 10);
+      }
+    };
+    tryRender();
+  } else {
+    // Clear form data when closing
+    clearWorkMessageForm();
+  }
+
+  return result;
+};
+
+
+// ============================================
+// Send Work Message with Template
+// ============================================
+
+async function sendWorkMessage(reqId) {
+  let fields = (currentMessageTemplate && currentMessageTemplate.fields) || [];
+  // Use default fields if empty
+  if (fields.length === 0) {
+    fields = getDefaultMessageFields();
+  }
+
+  // Always use form-based message composition
+  if (!isWorkMessageFormValid()) {
+    toast('请填写所有必填字段');
+    return;
+  }
+
+  const message = composeWorkMessage();
+  if (!message) {
+    toast('请填写消息内容');
+    return;
+  }
+
+  const allFiles = [];
+  fields.forEach(field => {
+    if (field.type === 'file') {
+      const files = currentWorkMessageFiles[field.name] || [];
+      allFiles.push(...files);
+    }
+  });
+
+  chatFiles[reqId] = allFiles;
+
+  const textarea = document.getElementById(`chat-input-${reqId}`);
+  if (textarea) {
+    textarea.value = message;
+  }
+
+  await sendChat(reqId);
+
+  clearWorkMessageForm();
+  // Use setTimeout to avoid race condition with toggleChat
+  setTimeout(() => renderWorkMessageForm(reqId), 0);
+}
+
+// ============================================
+// Shared Document Support for Work Messages
+// ============================================
+
+let sharedDocsCache = [];
+let selectedSharedDocs = {}; // fieldName -> [file paths]
+
+// Load shared documents list
+async function loadSharedDocsList(path = '') {
+  try {
+    const data = await api('GET', `/files/shared?path=${encodeURIComponent(path)}`);
+    if (data.type === 'directory') {
+      sharedDocsCache = data.items || [];
+      return data.items || [];
+    }
+    return [];
+  } catch (e) {
+    console.error('Failed to load shared docs:', e);
+    return [];
+  }
+}
+
+// Show shared document selector modal
+async function showSharedDocSelector(fieldName, reqId) {
+  selectedSharedDocs[fieldName] = selectedSharedDocs[fieldName] || [];
+
+  // Create modal if not exists
+  let modal = document.getElementById('shared-doc-selector-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'shared-doc-selector-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;z-index:9999;';
+    modal.innerHTML = `
+      <div class="modal" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-width:700px;width:90%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;padding:0;box-shadow:var(--shadow);">
+        <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:20px;border-bottom:1px solid var(--border);">
+          <h3 style="margin:0;">选择共享文档</h3>
+          <button class="btn btn-ghost" onclick="closeSharedDocSelector()" style="padding:4px 10px;">关闭</button>
+        </div>
+        <div id="shared-doc-selector-content" style="flex:1;overflow-y:auto;padding:20px;">
+          <!-- Content will be loaded here -->
+        </div>
+        <div style="padding:20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+          <span id="shared-doc-selected-count" style="font-size:13px;color:var(--text-muted);">已选择 0 个</span>
+          <button class="btn btn-primary" onclick="confirmSharedDocSelection()">确认选择</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeSharedDocSelector();
+    });
+  }
+
+  modal.dataset.fieldName = fieldName;
+  modal.dataset.reqId = reqId;
+  modal.style.display = 'flex';
+
+  // Load and render shared docs
+  await renderSharedDocSelectorContent('');
+}
+
+// Render shared document selector content
+async function renderSharedDocSelectorContent(currentPath) {
+  const container = document.getElementById('shared-doc-selector-content');
+  if (!container) {
+    console.error('shared-doc-selector-content container not found');
+    return;
+  }
+
+  const items = await loadSharedDocsList(currentPath);
+
+  let html = '';
+
+  // Breadcrumb
+  const paths = currentPath.split('/').filter(p => p);
+  html += '<div style="margin-bottom:16px;padding:10px 12px;background:var(--surface);border-radius:8px;font-size:13px;">';
+  html += '<span style="cursor:pointer;color:var(--primary);" onclick="renderSharedDocSelectorContent(\'\')">根目录</span>';
+  let accumPath = '';
+  paths.forEach((p, i) => {
+    accumPath += '/' + p;
+    html += ' / ';
+    html += `<span style="cursor:pointer;color:var(--primary);" onclick="renderSharedDocSelectorContent('${accumPath.substring(1)}')">${escapeHtml(p)}</span>`;
+  });
+  html += '</div>';
+
+  if (items.length === 0) {
+    html += '<p class="meta" style="text-align:center;padding:40px;">共享目录为空</p>';
+  } else {
+    html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+
+    // Directories first
+    items.filter(item => item.is_dir).forEach(dir => {
+      html += `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--surface);border-radius:8px;cursor:pointer;"
+             onclick="renderSharedDocSelectorContent('${dir.path}')"
+             onmouseenter="this.style.background='var(--surface-hover)'" onmouseleave="this.style.background='var(--surface)'">
+          <span style="font-size:20px;">📁</span>
+          <span style="flex:1;font-weight:500;">${escapeHtml(dir.name)}</span>
+          <span style="color:var(--text-muted);font-size:12px;">打开</span>
+        </div>
+      `;
+    });
+
+    // Then files
+    items.filter(item => !item.is_dir).forEach(file => {
+      const isSelected = selectedSharedDocs[document.getElementById('shared-doc-selector-modal').dataset.fieldName]?.includes(file.path);
+      const icon = getFileIconByName(file.name);
+      html += `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--surface);border-radius:8px;cursor:pointer;"
+             onclick="const cb = this.querySelector('input[type=checkbox]'); cb.checked = !cb.checked; toggleSharedDocSelection('${file.path}', cb.checked);"
+             onmouseenter="this.style.background='var(--surface-hover)'" onmouseleave="this.style.background='var(--surface)'">
+          <span style="font-size:20px;">${icon}</span>
+          <span style="flex:1;pointer-events:none;">
+            <div style="font-weight:500;">${escapeHtml(file.name)}</div>
+            <div style="font-size:11px;color:var(--text-muted);">${formatFileSize(file.size)}</div>
+          </span>
+          <input type="checkbox" ${isSelected ? 'checked' : ''}
+                 onclick="event.stopPropagation(); toggleSharedDocSelection('${file.path}', this.checked);"
+                 style="width:18px;height:18px;cursor:pointer;">
+        </div>
+      `;
+    });
+
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+  updateSharedDocSelectedCount();
+}
+
+// Get file icon by name
+function getFileIconByName(filename) {
+  if (filename.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i)) return '🖼️';
+  if (filename.match(/\.(txt|md)$/i)) return '📝';
+  if (filename.match(/\.(js|ts|jsx|tsx|py|java|go|rs|c|cpp|h|html|css|json|yaml|yml|sql)$/i)) return '💻';
+  if (filename.match(/\.(pdf)$/i)) return '📕';
+  if (filename.match(/\.(doc|docx)$/i)) return '📘';
+  if (filename.match(/\.(xls|xlsx)$/i)) return '📗';
+  if (filename.match(/\.(zip|rar|7z|tar|gz)$/i)) return '📦';
+  return '📄';
+}
+
+// Toggle shared document selection
+function toggleSharedDocSelection(path, selected) {
+  const modal = document.getElementById('shared-doc-selector-modal');
+  if (!modal) return;
+  const fieldName = modal.dataset.fieldName;
+
+  selectedSharedDocs[fieldName] = selectedSharedDocs[fieldName] || [];
+
+  if (selected) {
+    if (!selectedSharedDocs[fieldName].includes(path)) {
+      selectedSharedDocs[fieldName].push(path);
+    }
+  } else {
+    selectedSharedDocs[fieldName] = selectedSharedDocs[fieldName].filter(p => p !== path);
+  }
+
+  updateSharedDocSelectedCount();
+}
+
+// Update selected count display
+function updateSharedDocSelectedCount() {
+  const modal = document.getElementById('shared-doc-selector-modal');
+  if (!modal) return;
+
+  const fieldName = modal.dataset.fieldName;
+  const count = (selectedSharedDocs[fieldName] || []).length;
+  document.getElementById('shared-doc-selected-count').textContent = `已选择 ${count} 个`;
+}
+
+// Close shared document selector
+function closeSharedDocSelector() {
+  const modal = document.getElementById('shared-doc-selector-modal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
+// Confirm shared document selection
+async function confirmSharedDocSelection() {
+  const modal = document.getElementById('shared-doc-selector-modal');
+  const fieldName = modal.dataset.fieldName;
+  const reqId = modal.dataset.reqId;
+
+  const selectedPaths = selectedSharedDocs[fieldName] || [];
+
+  // Load content of selected files
+  const fileContents = [];
+  for (const path of selectedPaths) {
+    try {
+      const data = await api('GET', `/files/shared?path=${encodeURIComponent(path)}`);
+      if (data.type === 'file' && data.readable) {
+        fileContents.push({
+          path: path,
+          name: data.name,
+          content: data.content
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load shared file:', path, e);
+    }
+  }
+
+  // Store in work message data
+  currentWorkMessageData[fieldName] = fileContents.map(f => `${f.name}:\n\`\`\`\n${f.content.substring(0, 2000)}${f.content.length > 2000 ? '\n...(truncated)' : ''}\n\`\`\``).join('\n\n');
+
+  // Update UI
+  renderWorkMessageForm(reqId);
+
+  closeSharedDocSelector();
+  toast(`已添加 ${fileContents.length} 个共享文档`);
+}
+
+// Also make shared doc functions available globally
+window.renderSharedDocSelectorContent = renderSharedDocSelectorContent;
+window.toggleSharedDocSelection = toggleSharedDocSelection;
+window.confirmSharedDocSelection = confirmSharedDocSelection;
+window.closeSharedDocSelector = closeSharedDocSelector;
+window.showSharedDocSelector = showSharedDocSelector;
+
+// ============================================
+// Agent Presence Management
+// ============================================
+
+async function loadAgentPresence(reqId) {
+  try {
+    const agents = await api('GET', '/agents/presence');
+    renderAgentPresence(reqId, agents);
+  } catch (e) {
+    console.error('Failed to load agent presence:', e);
+  }
+}
+
+function renderAgentPresence(reqId, agents) {
+  const container = document.getElementById(`active-agents-${reqId}`);
+  const listContainer = document.getElementById(`active-agents-list-${reqId}`);
+  if (!container || !listContainer) return;
+
+  // Always show the panel
+  container.style.display = 'block';
+
+  if (!agents || agents.length === 0) {
+    listContainer.innerHTML = '<p style="font-size:12px;color:#6b7280;margin:0;">暂无智能体，点击"初始化"按钮注册默认智能体（PM、CodeReviewer、Architect）</p>';
+    return;
+  }
+
+  let html = '';
+  agents.forEach(agent => {
+    const statusMap = {
+      'idle': { color: '#22c55e', text: '空闲' },
+      'working': { color: '#f59e0b', text: '工作中' },
+      'done': { color: '#3b82f6', text: '已完成' },
+      'error': { color: '#ef4444', text: '错误' }
+    };
+    const status = statusMap[agent.status] || { color: '#6b7280', text: '未知' };
+    html += `
+      <div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:#fff;border:1px solid #bbf7d0;border-radius:16px;font-size:12px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:${status.color};"></span>
+        <span style="font-weight:500;color:#166534;">${escapeHtml(agent.agent_name)}</span>
+        <span style="color:#6b7280;font-size:11px;">${status.text}</span>
+      </div>
+    `;
+  });
+
+  listContainer.innerHTML = html;
+}
+
+async function refreshAgentPresence(reqId) {
+  await loadAgentPresence(reqId);
+  toast('智能体列表已刷新');
+}
+
+window.refreshAgentPresence = refreshAgentPresence;
+
+async function registerDefaultAgents() {
+  try {
+    const result = await api('POST', '/agents/presence/register-default?project_id=' + encodeURIComponent(currentProject?.id || ''));
+    toast(`已注册 ${result.registered} 个默认智能体`);
+    return result;
+  } catch (e) {
+    console.error('Failed to register default agents:', e);
+  }
+}
+
+window.registerDefaultAgents = registerDefaultAgents;
+console.log('App version: 1775642879');
+
+// ============================================
+// Auto-render forms when DOM changes
+// ============================================
+
+const formRenderObserver = new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    for (const node of mutation.addedNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        // Check if this is a work message form container
+        if (node.id && node.id.startsWith('work-message-form-')) {
+          const reqId = node.id.replace('work-message-form-', '');
+          if (reqId) {
+            console.log('MutationObserver: rendering form for', reqId);
+            renderWorkMessageForm(reqId);
+            loadAgentPresence(reqId);
+          }
+        }
+        // Also check children
+        const forms = node.querySelectorAll ? node.querySelectorAll('[id^="work-message-form-"]') : [];
+        forms.forEach(form => {
+          const reqId = form.id.replace('work-message-form-', '');
+          if (reqId) {
+            console.log('MutationObserver: rendering form for', reqId);
+            renderWorkMessageForm(reqId);
+            loadAgentPresence(reqId);
+          }
+        });
+      }
+    }
+  }
+});
+
+// Start observing when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    formRenderObserver.observe(document.body, { childList: true, subtree: true });
+  });
+} else {
+  formRenderObserver.observe(document.body, { childList: true, subtree: true });
 }

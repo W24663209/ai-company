@@ -51,3 +51,13 @@ def sync_ssh_keys_to_system():
         return result
     except AICompanyError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/diff")
+def get_working_diff(project_id: str):
+    """Get git diff of working directory changes for code review."""
+    try:
+        result = git_service.get_working_diff(project_id)
+        return result
+    except AICompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

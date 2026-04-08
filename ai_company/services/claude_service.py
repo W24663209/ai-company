@@ -71,18 +71,50 @@ def _build_system_prompt(project_id: str, requirement_id: str) -> str:
     project = get_project(project_id)
     req = get_requirement(project.id, requirement_id)
     memory_section = f"\nProject Memory:\n{project.memory}\n" if project.memory else ""
-    roles_section = f"\nAgent Roles & Responsibilities:\n{project.agent_roles}\n" if project.agent_roles else ""
 
     # Get skills for this project
     skills_prompt = get_skills_prompt_for_project(project_id)
     skills_section = f"\nActivated Skills:\n{skills_prompt}\n" if skills_prompt else ""
+
+    # Build agent roles instruction with emphasis
+    roles_instruction = ""
+    if project.agent_roles and project.agent_roles.strip():
+        roles_instruction = f"""
+
+🎭 YOUR ROLE & RESPONSIBILITIES:
+{project.agent_roles}
+
+⚠️ IMPORTANT: You MUST follow the above role definition and responsibilities. Work according to your assigned role and boundaries.
+"""
+
+    # Build JSON examples using format() to avoid f-string issues
+    review_example = json.dumps({
+        "project_id": project.id,
+        "requirement_id": req.id,
+        "reviewer": "PM Agent (Claude)",
+        "subject": f"Code Review for #{req.id}: {req.title}",
+        "review_content": "Summary of your review findings",
+        "files_reviewed": ["file1.py", "file2.js"],
+        "issues_found": [{"description": "Issue description", "severity": "minor"}],
+        "verdict": "approved"
+    }, indent=2)
+
+    communication_example = json.dumps({
+        "project_id": project.id,
+        "requirement_id": req.id,
+        "sender": "Claude (Developer)",
+        "receiver": "Frontend Agent",
+        "subject": "API changes that affect your work",
+        "content": "Details of the communication...",
+        "related_files": ["api/users.py"]
+    }, indent=2)
 
     prompt = f"""You are an AI software engineer working on a project managed by AI Company.
 
 Project: {project.name}
 Project Path: {project.path}
 Project Type: {project.type.value}
-{memory_section}{roles_section}{skills_section}
+{memory_section}{roles_instruction}{skills_section}
 Requirement #{req.id}: {req.title}
 Status: {req.status.value}
 Priority: {req.priority}
@@ -112,7 +144,42 @@ Instructions:
   - After completing this requirement, write a summary to `{settings.shared_dir}/artifacts/{req.id}_done.json`.
 - Use Plan Mode for complex changes if appropriate.
 - Do not modify files outside the project path or the shared directory unless explicitly required.
+
+AUTOMATIC CODE REVIEW PROCESS:
+After making code changes, you MUST run the following self-review before considering the task complete:
+
+1. Check git diff to see what files were modified
+2. For each modified file, verify:
+   - Logic correctness: Does the code do what was requested?
+   - Edge cases: Are error conditions handled properly?
+   - Code style: Is it consistent with the existing codebase?
+   - Performance: Are there obvious inefficiencies?
+   - Security: Are there any obvious vulnerabilities?
+3. If issues are found, fix them immediately
+4. Report your review findings in your response
+
+5. RECORD THE REVIEW: After completing the review, call the API to record your review:
+   curl -X POST http://localhost:8080/agents/messages/review \\
+     -H "Content-Type: application/json" \\
+     -d '{review_example}'
+
+COMMUNICATE WITH OTHER AGENTS:
+When you need to communicate with other agents about this requirement, use the agent messages API:
+   curl -X POST http://localhost:8080/agents/messages/communication \\
+     -H "Content-Type: application/json" \\
+     -d '{communication_example}'
+
+When you have completed your work, end your response with:
+---
+🔍 PM Review Summary:
+- Files modified: [list]
+- Logic verification: [PASS/NEEDS_FIX] - explanation
+- Edge cases handled: [YES/NO] - explanation
+- Code style check: [PASS/NEEDS_IMPROVEMENT] - explanation
+- Overall assessment: [READY/COMPLETE]
+- Review recorded: [YES/NO]
 """
+
     return prompt
 
 

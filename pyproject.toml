@@ -16,6 +16,8 @@ dependencies = [
     "watchdog>=6.0.0",
     "pyyaml>=6.0.2",
     "rich>=13.9.0",
+    "pymysql>=1.1.0",
+    "cryptography>=3.0.0",
 ]
 
 [project.optional-dependencies]
