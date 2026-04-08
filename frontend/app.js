@@ -5204,7 +5204,9 @@ ${claudeResponse.substring(0, 3000)}${claudeResponse.length > 3000 ? '\n\n...(å†
     scrollChatToBottom(reqId);
 
     // Call API to get agent response (handle SSE streaming)
-    const response = await fetch('/agents/chat?project_id=' + encodeURIComponent(currentProject.id) + '&requirement_id=' + encodeURIComponent(reqId), {
+    // Use a unique requirement ID for each agent to avoid session conflicts
+    const agentReqId = reqId + '_agent_' + agent.role;
+    const response = await fetch('/agents/chat?project_id=' + encodeURIComponent(currentProject.id) + '&requirement_id=' + encodeURIComponent(agentReqId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: agentPrompt })
