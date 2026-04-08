@@ -375,14 +375,18 @@ async function toggleChat(reqId) {
     await loadCollabMessagesForReq(reqId);
     await loadCodeChangesForReq(reqId);
   }
-  loadReqs();
+  await loadReqs();
 
-  // Multiple scroll attempts to ensure DOM is fully rendered
-  const scrollAttempts = [100, 300, 600];
-  scrollAttempts.forEach((delay, index) => {
-    setTimeout(() => {
-      scrollChatToBottom(reqId, index === scrollAttempts.length - 1);
-    }, delay);
+  // Scroll to bottom after DOM is fully rendered
+  // Use requestAnimationFrame to ensure browser has painted
+  requestAnimationFrame(() => {
+    scrollChatToBottom(reqId, false);
+    // Multiple fallback scrolls with increasing delays
+    [100, 300, 500, 800].forEach((delay, index) => {
+      setTimeout(() => {
+        scrollChatToBottom(reqId, index === 3);
+      }, delay);
+    });
   });
 
   setTimeout(() => {
