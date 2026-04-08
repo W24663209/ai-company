@@ -669,6 +669,10 @@ async function sendChat(reqId) {
         saveWorklog(reqId);
         playCompletionSound();
         ws.close();
+
+        // Trigger agent participation after Claude's response
+        triggerAgentParticipation(reqId, fullMessage, fullResponse);
+
         resolve();
       } else if (data.type === 'error') {
         if (isResolved) return;
@@ -5027,6 +5031,276 @@ window.closeSharedDocSelector = closeSharedDocSelector;
 window.showSharedDocSelector = showSharedDocSelector;
 window.removeSharedDoc = removeSharedDoc;
 window.loadSharedDocsContentForSending = loadSharedDocsContentForSending;
+
+// ============================================
+// Agent Participation (PM, CodeReviewer, Architect)
+// ============================================
+
+// Track agent participation state
+let agentParticipationState = {}; // reqId -> { lastParticipated: timestamp, count: number }
+
+// Trigger agent participation after user conversation
+async function triggerAgentParticipation(reqId, userMessage, claudeResponse) {
+  // Check if agents should participate (avoid too frequent participation)
+  const now = Date.now();
+  const state = agentParticipationState[reqId] || { lastParticipated: 0, count: 0 };
+
+  // Only participate every 3 messages or if 5 minutes passed
+  state.count++;
+  if (state.count % 3 !== 0 && now - state.lastParticipated < 300000) {
+    return;
+  }
+  state.lastParticipated = now;
+  agentParticipationState[reqId] = state;
+
+  // Get active agents
+  try {
+    const agents = await api('GET', '/agents/presence');
+    if (!agents || agents.length === 0) return;
+
+    // Check for code changes in the response
+    const hasCodeChanges = claudeResponse.includes('```') ||
+                           claudeResponse.includes('git diff') ||
+                           claudeResponse.includes('modified:');
+
+    // Determine which agents should participate
+    const participatingAgents = [];
+
+    // PM always participates to summarize/provide guidance
+    const pmAgent = agents.find(a => a.agent_name.includes('PM') || a.agent_name.includes('项目经理'));
+    if (pmAgent) {
+      participatingAgents.push({ ...pmAgent, role: 'pm', priority: 1 });
+    }
+
+    // CodeReviewer participates if there are code changes
+    if (hasCodeChanges) {
+      const reviewerAgent = agents.find(a => a.agent_name.includes('CodeReviewer') || a.agent_name.includes('代码审核'));
+      if (reviewerAgent) {
+        participatingAgents.push({ ...reviewerAgent, role: 'reviewer', priority: 2 });
+      }
+    }
+
+    // Architect participates for design/architecture discussions
+    const hasArchitectureDiscussion = userMessage.includes('设计') ||
+                                       userMessage.includes('架构') ||
+                                       userMessage.includes('design') ||
+                                       userMessage.includes('architecture') ||
+                                       claudeResponse.includes('设计') ||
+                                       claudeResponse.includes('架构');
+    if (hasArchitectureDiscussion) {
+      const architectAgent = agents.find(a => a.agent_name.includes('Architect') || a.agent_name.includes('架构师'));
+      if (architectAgent) {
+        participatingAgents.push({ ...architectAgent, role: 'architect', priority: 3 });
+      }
+    }
+
+    // Trigger each participating agent with a delay
+    for (const agent of participatingAgents.sort((a, b) => a.priority - b.priority)) {
+      setTimeout(() => {
+        requestAgentParticipation(reqId, agent, userMessage, claudeResponse);
+      }, agent.priority * 2000); // 2s delay between agents
+    }
+  } catch (e) {
+    console.error('Failed to trigger agent participation:', e);
+  }
+}
+
+// Request a specific agent to participate
+async function requestAgentParticipation(reqId, agent, userMessage, claudeResponse) {
+  try {
+    // Update agent status to working
+    await api('POST', '/agents/presence', {
+      agent_name: agent.agent_name,
+      project_id: currentProject?.id,
+      status: 'working',
+      current_req: reqId
+    });
+
+    // Build agent-specific prompt
+    let agentPrompt = '';
+    let agentTitle = '';
+
+    switch (agent.role) {
+      case 'pm':
+        agentTitle = 'PM (项目经理)';
+        agentPrompt = `作为项目经理，请 review 以下开发对话，提供你的专业意见：
+
+1. 需求理解是否正确？
+2. 实现方案是否合理？
+3. 是否有遗漏的风险或注意事项？
+4. 下一步建议
+
+【用户原始需求】: ${userMessage.substring(0, 500)}${userMessage.length > 500 ? '...' : ''}
+
+【Claude 的回复】: ${claudeResponse.substring(0, 1000)}${claudeResponse.length > 1000 ? '...' : ''}
+
+请用中文简洁回复（3-5点），以 "📋 PM Review:" 开头。`;
+        break;
+
+      case 'reviewer':
+        agentTitle = 'CodeReviewer (代码审核)';
+        agentPrompt = `作为代码审核员，请 review 以下代码变更：
+
+1. 代码质量评估
+2. 潜在问题或 bug
+3. 性能考虑
+4. 最佳实践建议
+
+【代码变更】: ${claudeResponse.substring(0, 1500)}${claudeResponse.length > 1500 ? '...' : ''}
+
+请用中文简洁回复，以 "🔍 Code Review:" 开头。如果有代码问题，请指出具体行。`;
+        break;
+
+      case 'architect':
+        agentTitle = 'Architect (架构师)';
+        agentPrompt = `作为架构师，请评估以下设计方案：
+
+1. 架构合理性
+2. 可扩展性考虑
+3. 技术选型建议
+4. 潜在技术债务
+
+【设计讨论】: ${claudeResponse.substring(0, 1500)}${claudeResponse.length > 1500 ? '...' : ''}
+
+请用中文简洁回复，以 "🏗️ Architecture:" 开头。`;
+        break;
+    }
+
+    // Show agent is thinking
+    appendAgentThinkingBubble(reqId, agentTitle);
+    scrollChatToBottom(reqId);
+
+    // Call API to get agent response (handle SSE streaming)
+    const response = await fetch('/agents/chat?project_id=' + encodeURIComponent(currentProject.id) + '&requirement_id=' + encodeURIComponent(reqId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: agentPrompt })
+    });
+
+    if (!response.ok) {
+      throw new Error('Agent API error: ' + response.status);
+    }
+
+    // Read SSE stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let agentResponse = '';
+    let done = false;
+
+    while (!done) {
+      const { value, done: readerDone } = await reader.read();
+      if (readerDone) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'stdout' && data.data) {
+              agentResponse += data.data;
+            } else if (data.type === 'done') {
+              done = true;
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+      }
+    }
+
+    // Remove thinking bubble
+    removeAgentThinkingBubble(reqId, agentTitle);
+
+    // Add agent response to chat
+    if (agentResponse) {
+      chatHistories[reqId].push({
+        role: 'agent',
+        agent_name: agentTitle,
+        text: agentResponse
+      });
+      appendAgentChatBubble(reqId, agentTitle, agentResponse);
+      scrollChatToBottom(reqId);
+      saveWorklog(reqId);
+    }
+
+    // Update agent status back to idle
+    await api('POST', '/agents/presence', {
+      agent_name: agent.agent_name,
+      project_id: currentProject?.id,
+      status: 'idle'
+    });
+
+    // Refresh agent presence display
+    loadAgentPresence(reqId);
+
+  } catch (e) {
+    console.error(`Agent ${agent.agent_name} participation failed:`, e);
+    removeAgentThinkingBubble(reqId, agent.agent_name);
+
+    // Reset agent status on error
+    try {
+      await api('POST', '/agents/presence', {
+        agent_name: agent.agent_name,
+        project_id: currentProject?.id,
+        status: 'idle'
+      });
+    } catch (err) {
+      // Ignore
+    }
+  }
+}
+
+// Append agent thinking bubble
+function appendAgentThinkingBubble(reqId, agentName) {
+  const container = document.getElementById(`chat-history-${reqId}`);
+  if (!container) return;
+
+  const bubble = document.createElement('div');
+  bubble.id = `agent-thinking-${reqId}-${agentName.replace(/\s+/g, '-')}`;
+  bubble.className = 'chat-bubble agent-thinking';
+  bubble.style.cssText = 'background:#fef3c7;border-left:3px solid #f59e0b;';
+  bubble.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;color:#92400e;font-size:13px;">
+      <span class="loading-spinner" style="width:14px;height:14px;border-width:2px;"></span>
+      <span><strong>${escapeHtml(agentName)}</strong> 正在思考...</span>
+    </div>
+  `;
+  container.appendChild(bubble);
+}
+
+// Remove agent thinking bubble
+function removeAgentThinkingBubble(reqId, agentName) {
+  const bubble = document.getElementById(`agent-thinking-${reqId}-${agentName.replace(/\s+/g, '-')}`);
+  if (bubble) bubble.remove();
+}
+
+// Append agent chat bubble
+function appendAgentChatBubble(reqId, agentName, text) {
+  const container = document.getElementById(`chat-history-${reqId}`);
+  if (!container) return;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble agent';
+
+  // Color code by agent type
+  let borderColor = '#6b7280';
+  let bgColor = '#f3f4f6';
+  if (agentName.includes('PM')) { borderColor = '#22c55e'; bgColor = '#f0fdf4'; }
+  else if (agentName.includes('CodeReviewer')) { borderColor = '#3b82f6'; bgColor = '#eff6ff'; }
+  else if (agentName.includes('Architect')) { borderColor = '#a855f7'; bgColor = '#faf5ff'; }
+
+  bubble.style.cssText = `background:${bgColor};border-left:3px solid ${borderColor};`;
+  bubble.innerHTML = `
+    <div style="font-size:12px;font-weight:600;color:${borderColor};margin-bottom:4px;">${escapeHtml(agentName)}</div>
+    <div style="color:#374151;white-space:pre-wrap;">${escapeHtml(text)}</div>
+  `;
+  container.appendChild(bubble);
+}
+
+window.triggerAgentParticipation = triggerAgentParticipation;
+window.requestAgentParticipation = requestAgentParticipation;
 
 // ============================================
 // Agent Presence Management
