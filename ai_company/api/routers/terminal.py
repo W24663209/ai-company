@@ -77,7 +77,7 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
     python_version = websocket.query_params.get("python_version") or get_runtime_version(env_config, "python")
 
     # Get build directory from environment
-    build_dir = env_config.get("build_dir", "")
+    build_dir = env_config.build_dir if hasattr(env_config, 'build_dir') else env_config.get("build_dir", "")
 
     # Resolve working directory
     cwd = _resolve_cwd(project.path, build_dir)
@@ -110,8 +110,9 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
         # Merge project.env and environment.env_vars (environment takes precedence)
         if project.env:
             env.update(project.env)
-        if env_config.get("env_vars"):
-            env.update(env_config["env_vars"])
+        env_vars = env_config.env_vars if hasattr(env_config, 'env_vars') else env_config.get("env_vars", {})
+        if env_vars:
+            env.update(env_vars)
 
         # Set runtime versions from environment config
         if java_version:

@@ -11,13 +11,14 @@ from ai_company.services.project_service import get_project
 
 
 def get_active_environment(project) -> dict:
-    """Get the currently active environment for a project."""
+    """Get the currently active environment for a project as a dict."""
     env_name = project.active_environment or "default"
     environments = project.environments or []
 
     for env in environments:
         if env.name == env_name:
-            return env
+            # Convert Pydantic model to dict
+            return env.model_dump() if hasattr(env, 'model_dump') else env
 
     # Return default if not found
     return {
