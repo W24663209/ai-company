@@ -12,7 +12,29 @@ from pydantic import BaseModel, ConfigDict, Field
 class ProjectType(str, Enum):
     JAVA = "java"
     NODE = "node"
+    PYTHON = "python"
     MIXED = "mixed"
+
+
+class RuntimeVersion(BaseModel):
+    """Runtime version configuration for a project"""
+    model_config = ConfigDict(extra="ignore")
+
+    runtime: str  # "node", "python", "java"
+    version: str  # e.g., "18", "20", "3.11", "17"
+    default: bool = False  # Is this the default version for this runtime
+
+
+class BuildEnvironment(BaseModel):
+    """Build environment configuration"""
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = "default"  # Environment name (default, staging, production, etc.)
+    build_dir: str = ""  # Build output directory (relative to project path)
+    runtime_versions: list[RuntimeVersion] = Field(default_factory=list)
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    build_commands: list[str] = Field(default_factory=list)  # Custom build commands
+    active: bool = True  # Is this environment currently active
 
 
 class RequirementStatus(str, Enum):
@@ -41,6 +63,9 @@ class Project(BaseModel):
     claude_settings: str = ""
     scripts: list[dict[str, str]] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    # Environment configurations
+    environments: list[BuildEnvironment] = Field(default_factory=list)
+    active_environment: str = "default"  # Name of currently active environment
 
 
 class Requirement(BaseModel):

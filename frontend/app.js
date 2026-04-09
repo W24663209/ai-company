@@ -162,6 +162,7 @@ function showProjectTab(name) {
   if (btn) btn.classList.add('active');
   document.getElementById('panel-' + name).classList.remove('hidden');
   if (name === 'requirements') loadReqs();
+  if (name === 'env') loadEnvironmentConfig();
   if (name === 'builds') updateBuildOptions();
   if (name === 'files') {
     loadFileTree('');
@@ -5476,3 +5477,327 @@ if (document.readyState === 'loading') {
 } else {
   formRenderObserver.observe(document.body, { childList: true, subtree: true });
 }
+
+// ============================================
+// Environment Configuration Functions
+// ============================================
+
+let currentEnvironment = 'default';
+let projectEnvironments = {};
+
+// Load environment configuration
+async function loadEnvironmentConfig() {
+  if (!currentProject) return;
+
+  try {
+    const project = await api('GET', '/projects/' + currentProject.id);
+    projectEnvironments = {};
+
+    // Parse environments from project
+    if (project.environments) {
+      project.environments.forEach(env => {
+        projectEnvironments[env.name] = env;
+      });
+    }
+
+    // Always have default environment
+    if (!projectEnvironments['default']) {
+      projectEnvironments['default'] = {
+        name: 'default',
+        runtime_versions: [],
+        env_vars: {},
+        build_dir: '',
+        build_commands: [],
+        active: true
+      };
+    }
+
+    currentEnvironment = project.active_environment || 'default';
+
+    renderEnvironmentSelector();
+    renderEnvironmentForm(projectEnvironments[currentEnvironment]);
+  } catch (e) {
+    console.error('Failed to load environment config:', e);
+    toast('加载环境配置失败');
+  }
+}
+
+// Render environment selector dropdown
+function renderEnvironmentSelector() {
+  const selector = document.getElementById('env-selector');
+  if (!selector) return;
+
+  selector.innerHTML = Object.keys(projectEnvironments).map(name =>
+    `\u003coption value="${name}" ${name === currentEnvironment ? 'selected' : ''}\u003e${name === 'default' ? '默认环境' : name}\u003c/option\u003e`
+  ).join('');
+}
+
+// Render environment form
+function renderEnvironmentForm(env) {
+  if (!env) return;
+
+  // Reset all fields
+  document.getElementById('env-node-version').value = '';
+  document.getElementById('env-python-version').value = '';
+  document.getElementById('env-java-version').value = '';
+  document.getElementById('env-node-default').checked = false;
+  document.getElementById('env-python-default').checked = false;
+  document.getElementById('env-java-default').checked = false;
+  document.getElementById('env-build-dir').value = env.build_dir || '';
+
+  // Set runtime versions
+  if (env.runtime_versions) {
+    env.runtime_versions.forEach(rv => {
+      if (rv.runtime === 'node') {
+        document.getElementById('env-node-version').value = rv.version;
+        document.getElementById('env-node-default').checked = rv.default;
+      } else if (rv.runtime === 'python') {
+        document.getElementById('env-python-version').value = rv.version;
+        document.getElementById('env-python-default').checked = rv.default;
+      } else if (rv.runtime === 'java') {
+        document.getElementById('env-java-version').value = rv.version;
+        document.getElementById('env-java-default').checked = rv.default;
+      }
+    });
+  }
+
+  // Render build commands
+  const buildCommandsContainer = document.getElementById('env-build-commands');
+  if (buildCommandsContainer) {
+    if (env.build_commands && env.build_commands.length > 0) {
+      buildCommandsContainer.innerHTML = env.build_commands.map(cmd => `
+        \u003cdiv class="form-row"\u003e
+          \u003cinput type="text" value="${escapeHtml(cmd)}" placeholder="构建命令" style="flex:1"\u003e
+          \u003cbutton class="btn btn-ghost" onclick="this.parentElement.remove()" style="color:#dc2626"\u003e删除\u003c/button\u003e
+        \u003c/div\u003e
+      `).join('');
+    } else {
+      buildCommandsContainer.innerHTML = `
+        \u003cdiv class="form-row"\u003e
+          \u003cinput type="text" placeholder="构建命令 (例如: npm run build)" style="flex:1"\u003e
+          \u003cbutton class="btn btn-ghost" onclick="this.parentElement.remove()" style="color:#dc2626"\u003e删除\u003c/button\u003e
+        \u003c/div\u003e
+      `;
+    }
+  }
+
+  // Render environment variables
+  const envVarsContainer = document.getElementById('env-vars-list');
+  if (envVarsContainer) {
+    const envVars = env.env_vars || {};
+    const entries = Object.entries(envVars);
+    if (entries.length > 0) {
+      envVarsContainer.innerHTML = entries.map(([key, value]) => `
+        \u003cdiv class="form-row"\u003e
+          \u003cinput type="text" value="${escapeHtml(key)}" placeholder="变量名 (KEY)" style="width:200px"\u003e
+          \u003cinput type="text" value="${escapeHtml(value)}" placeholder="变量值 (VALUE)" style="flex:1"\u003e
+          \u003cbutton class="btn btn-ghost" onclick="this.parentElement.remove()" style="color:#dc2626"\u003e删除\u003c/button\u003e
+        \u003c/div\u003e
+      `).join('');
+    } else {
+      envVarsContainer.innerHTML = `
+        \u003cdiv class="form-row"\u003e
+          \u003cinput type="text" placeholder="变量名 (KEY)" style="width:200px"\u003e
+          \u003cinput type="text" placeholder="变量值 (VALUE)" style="flex:1"\u003e
+          \u003cbutton class="btn btn-ghost" onclick="this.parentElement.remove()" style="color:#dc2626"\u003e删除\u003c/button\u003e
+        \u003c/div\u003e
+      `;
+    }
+  }
+
+  // Show/hide delete button
+  const deleteBtn = document.getElementById('btn-delete-env');
+  if (deleteBtn) {
+    deleteBtn.style.display = currentEnvironment === 'default' ? 'none' : 'inline-block';
+  }
+}
+
+// Switch to a different environment
+function switchEnvironment() {
+  const selector = document.getElementById('env-selector');
+  currentEnvironment = selector.value;
+  renderEnvironmentForm(projectEnvironments[currentEnvironment]);
+}
+
+// Add new environment
+function addNewEnvironment() {
+  const name = prompt('输入新环境名称 (例如: staging, production):');
+  if (!name || name.trim() === '') return;
+
+  const trimmedName = name.trim();
+  if (projectEnvironments[trimmedName]) {
+    alert('环境名称已存在');
+    return;
+  }
+
+  projectEnvironments[trimmedName] = {
+    name: trimmedName,
+    runtime_versions: [],
+    env_vars: {},
+    build_dir: '',
+    build_commands: [],
+    active: true
+  };
+
+  currentEnvironment = trimmedName;
+  renderEnvironmentSelector();
+  renderEnvironmentForm(projectEnvironments[trimmedName]);
+  toast(`已创建环境: ${trimmedName}`);
+}
+
+// Delete current environment
+async function deleteCurrentEnvironment() {
+  if (currentEnvironment === 'default') {
+    alert('不能删除默认环境');
+    return;
+  }
+
+  if (!confirm(`确定要删除环境 "${currentEnvironment}" 吗？`)) return;
+
+  try {
+    await api('DELETE', `/projects/${currentProject.id}/environments/${currentEnvironment}`);
+    delete projectEnvironments[currentEnvironment];
+    currentEnvironment = 'default';
+    renderEnvironmentSelector();
+    renderEnvironmentForm(projectEnvironments['default']);
+    toast('环境已删除');
+  } catch (e) {
+    console.error('Failed to delete environment:', e);
+    toast('删除环境失败');
+  }
+}
+
+// Set default runtime
+function setDefaultRuntime(runtime) {
+  // Uncheck other runtimes
+  ['node', 'python', 'java'].forEach(r => {
+    if (r !== runtime) {
+      document.getElementById(`env-${r}-default`).checked = false;
+    }
+  });
+}
+
+// Add build command
+function addBuildCommand() {
+  const container = document.getElementById('env-build-commands');
+  const div = document.createElement('div');
+  div.className = 'form-row';
+  div.innerHTML = `
+    \u003cinput type="text" placeholder="构建命令" style="flex:1"\u003e
+    \u003cbutton class="btn btn-ghost" onclick="this.parentElement.remove()" style="color:#dc2626"\u003e删除\u003c/button\u003e
+  `;
+  container.appendChild(div);
+}
+
+// Add environment variable
+function addEnvVar() {
+  const container = document.getElementById('env-vars-list');
+  const div = document.createElement('div');
+  div.className = 'form-row';
+  div.innerHTML = `
+    \u003cinput type="text" placeholder="变量名 (KEY)" style="width:200px"\u003e
+    \u003cinput type="text" placeholder="变量值 (VALUE)" style="flex:1"\u003e
+    \u003cbutton class="btn btn-ghost" onclick="this.parentElement.remove()" style="color:#dc2626"\u003e删除\u003c/button\u003e
+  `;
+  container.appendChild(div);
+}
+
+// Browse build directory
+function browseBuildDir() {
+  const currentDir = document.getElementById('env-build-dir').value;
+  const newDir = prompt('输入构建目录路径 (相对于项目根目录):', currentDir);
+  if (newDir !== null) {
+    document.getElementById('env-build-dir').value = newDir.trim();
+  }
+}
+
+// Save environment configuration
+async function saveEnvironmentConfig() {
+  if (!currentProject) return;
+
+  try {
+    // Collect runtime versions
+    const runtimeVersions = [];
+
+    const nodeVersion = document.getElementById('env-node-version').value;
+    if (nodeVersion) {
+      runtimeVersions.push({
+        runtime: 'node',
+        version: nodeVersion,
+        default: document.getElementById('env-node-default').checked
+      });
+    }
+
+    const pythonVersion = document.getElementById('env-python-version').value;
+    if (pythonVersion) {
+      runtimeVersions.push({
+        runtime: 'python',
+        version: pythonVersion,
+        default: document.getElementById('env-python-default').checked
+      });
+    }
+
+    const javaVersion = document.getElementById('env-java-version').value;
+    if (javaVersion) {
+      runtimeVersions.push({
+        runtime: 'java',
+        version: javaVersion,
+        default: document.getElementById('env-java-default').checked
+      });
+    }
+
+    // Collect build commands
+    const buildCommands = [];
+    document.querySelectorAll('#env-build-commands .form-row input').forEach(input => {
+      if (input.value.trim()) buildCommands.push(input.value.trim());
+    });
+
+    // Collect environment variables
+    const envVars = {};
+    document.querySelectorAll('#env-vars-list .form-row').forEach(row => {
+      const inputs = row.querySelectorAll('input');
+      if (inputs[0].value.trim()) {
+        envVars[inputs[0].value.trim()] = inputs[1].value;
+      }
+    });
+
+    // Build environment object
+    const environment = {
+      name: currentEnvironment,
+      runtime_versions: runtimeVersions,
+      env_vars: envVars,
+      build_dir: document.getElementById('env-build-dir').value.trim(),
+      build_commands: buildCommands,
+      active: true
+    };
+
+    // Save to server
+    await api('POST', `/projects/${currentProject.id}/environments`, environment);
+
+    // Update active environment
+    if (currentEnvironment !== 'default') {
+      await api('POST', `/projects/${currentProject.id}/environments/${currentEnvironment}/activate`);
+    }
+
+    // Update local cache
+    projectEnvironments[currentEnvironment] = environment;
+    currentProject.environments = Object.values(projectEnvironments);
+    currentProject.active_environment = currentEnvironment;
+
+    toast('环境配置已保存');
+  } catch (e) {
+    console.error('Failed to save environment config:', e);
+    toast('保存环境配置失败: ' + (e.message || '未知错误'));
+  }
+}
+
+// Make functions available globally
+window.loadEnvironmentConfig = loadEnvironmentConfig;
+window.switchEnvironment = switchEnvironment;
+window.addNewEnvironment = addNewEnvironment;
+window.deleteCurrentEnvironment = deleteCurrentEnvironment;
+window.setDefaultRuntime = setDefaultRuntime;
+window.addBuildCommand = addBuildCommand;
+window.addEnvVar = addEnvVar;
+window.browseBuildDir = browseBuildDir;
+window.saveEnvironmentConfig = saveEnvironmentConfig;

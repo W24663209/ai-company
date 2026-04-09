@@ -438,6 +438,7 @@
 
       <div class="tabs">
         <button class="tab-btn active" onclick="showProjectTab('requirements')">需求</button>
+        <button class="tab-btn" onclick="showProjectTab('env')">环境</button>
         <button class="tab-btn" onclick="showProjectTab('builds')">构建</button>
         <button class="tab-btn" onclick="showProjectTab('files')">文件</button>
         <button class="tab-btn" onclick="showProjectTab('shared')">共享</button>
@@ -470,6 +471,124 @@
               <tr><td colspan="6" class="empty">加载中...</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Environment Configuration Panel -->
+      <div id="panel-env" class="panel hidden">
+        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0">🖥️ 开发环境配置</h3>
+            <div style="display:flex;gap:8px">
+              <select id="env-selector" onchange="switchEnvironment()" style="padding:6px 12px;font-size:13px">
+                <option value="default">默认环境</option>
+              </select>
+              <button class="btn btn-primary" onclick="addNewEnvironment()">+ 新建环境</button>
+            </div>
+          </div>
+
+          <div style="margin-bottom:24px">
+            <h4 style="margin-bottom:12px;color:var(--primary)">运行时版本</h4>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px">
+              <!-- Node.js -->
+              <div style="padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                  <span style="font-size:24px">🟢</span>
+                  <strong>Node.js</strong>
+                  <label style="margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px">
+                    <input type="checkbox" id="env-node-default" onchange="setDefaultRuntime('node')"> 默认
+                  </label>
+                </div>
+                <select id="env-node-version" style="width:100%;margin-bottom:8px">
+                  <option value="">未启用</option>
+                  <option value="16">Node 16</option>
+                  <option value="18">Node 18</option>
+                  <option value="20">Node 20 (LTS)</option>
+                  <option value="22">Node 22</option>
+                  <option value="24">Node 24</option>
+                </select>
+              </div>
+
+              <!-- Python -->
+              <div style="padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                  <span style="font-size:24px">🐍</span>
+                  <strong>Python</strong>
+                  <label style="margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px">
+                    <input type="checkbox" id="env-python-default" onchange="setDefaultRuntime('python')"> 默认
+                  </label>
+                </div>
+                <select id="env-python-version" style="width:100%;margin-bottom:8px">
+                  <option value="">未启用</option>
+                  <option value="3.8">Python 3.8</option>
+                  <option value="3.9">Python 3.9</option>
+                  <option value="3.10">Python 3.10</option>
+                  <option value="3.11">Python 3.11</option>
+                  <option value="3.12">Python 3.12</option>
+                </select>
+              </div>
+
+              <!-- Java -->
+              <div style="padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                  <span style="font-size:24px">☕</span>
+                  <strong>Java</strong>
+                  <label style="margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px">
+                    <input type="checkbox" id="env-java-default" onchange="setDefaultRuntime('java')"> 默认
+                  </label>
+                </div>
+                <select id="env-java-version" style="width:100%;margin-bottom:8px">
+                  <option value="">未启用</option>
+                  <option value="11">Java 11</option>
+                  <option value="17">Java 17 (LTS)</option>
+                  <option value="21">Java 21</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:24px">
+            <h4 style="margin-bottom:12px;color:var(--primary)">📁 构建目录配置</h4>
+            <div style="display:flex;gap:12px;align-items:center">
+              <input id="env-build-dir" placeholder="构建输出目录 (相对于项目路径，留空使用项目根目录)" style="flex:1">
+              <button class="btn btn-secondary" onclick="browseBuildDir()">浏览...</button>
+            </div>
+            <p class="meta" style="margin-top:8px;font-size:12px;color:var(--text-muted)">
+              例如：dist、build、target、.next 等。此目录将用于构建输出和部署。
+            </p>
+          </div>
+
+          <div style="margin-bottom:24px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <h4 style="margin:0;color:var(--primary)">🔨 构建命令</h4>
+              <button class="btn btn-secondary" onclick="addBuildCommand()" style="padding:4px 10px;font-size:12px">+ 添加命令</button>
+            </div>
+            <div id="env-build-commands" style="display:flex;flex-direction:column;gap:8px">
+              <div class="form-row">
+                <input type="text" placeholder="构建命令 (例如: npm run build)" style="flex:1">
+                <button class="btn btn-ghost" onclick="this.parentElement.remove()" style="color:#dc2626">删除</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:24px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <h4 style="margin:0;color:var(--primary)">🔐 环境变量</h4>
+              <button class="btn btn-secondary" onclick="addEnvVar()" style="padding:4px 10px;font-size:12px">+ 添加变量</button>
+            </div>
+            <div id="env-vars-list" style="display:flex;flex-direction:column;gap:8px">
+              <div class="form-row">
+                <input type="text" placeholder="变量名 (KEY)" style="width:200px">
+                <input type="text" placeholder="变量值 (VALUE)" style="flex:1">
+                <button class="btn btn-ghost" onclick="this.parentElement.remove()" style="color:#dc2626">删除</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;gap:12px;border-top:1px solid var(--border);padding-top:20px">
+            <button class="btn btn-secondary" onclick="deleteCurrentEnvironment()" id="btn-delete-env" style="display:none">删除此环境</button>
+            <button class="btn btn-primary" onclick="saveEnvironmentConfig()">💾 保存环境配置</button>
+          </div>
         </div>
       </div>
 
