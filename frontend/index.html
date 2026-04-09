@@ -594,21 +594,37 @@
 
       <div id="panel-builds" class="panel hidden">
         <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
-          <h3>运行构建</h3>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0">运行构建</h3>
+            <div id="build-env-info" style="font-size:13px;color:var(--primary);background:var(--surface);padding:6px 12px;border-radius:6px;border:1px solid var(--border)">
+              当前环境: <strong id="build-current-env">default</strong>
+              <span id="build-env-runtimes" style="margin-left:8px"></span>
+            </div>
+          </div>
           <div class="form-row">
-            <select id="build-type">
+            <select id="build-type" onchange="updateBuildOptions()">
+              <option value="auto">自动检测</option>
               <option value="java">Java</option>
               <option value="node">Node</option>
+              <option value="python">Python</option>
             </select>
             <select id="build-jdk" style="width:110px">
               <option value="11">JDK 11</option>
               <option value="17" selected>JDK 17</option>
+              <option value="21">JDK 21</option>
             </select>
             <select id="build-node" style="width:110px;display:none">
               <option value="18">Node 18</option>
               <option value="20" selected>Node 20</option>
               <option value="22">Node 22</option>
               <option value="24">Node 24</option>
+            </select>
+            <select id="build-python" style="width:110px;display:none">
+              <option value="3.8">Python 3.8</option>
+              <option value="3.9">Python 3.9</option>
+              <option value="3.10">Python 3.10</option>
+              <option value="3.11" selected>Python 3.11</option>
+              <option value="3.12">Python 3.12</option>
             </select>
             <select id="build-quick" style="min-width:200px" onchange="applyQuickBuild()">
               <option value="">-- 快捷指令 --</option>
@@ -668,7 +684,13 @@
 
       <div id="panel-terminal" class="panel hidden">
         <div class="card" style="margin-bottom:20px;max-width:1400px;margin-left:auto;margin-right:auto">
-          <h3 style="margin-top:0">快捷脚本</h3>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0">快捷脚本</h3>
+            <div id="term-env-info" style="font-size:13px;color:var(--primary);background:var(--surface);padding:6px 12px;border-radius:6px;border:1px solid var(--border)">
+              当前环境: <strong id="term-current-env">default</strong>
+              <span id="term-env-runtimes" style="margin-left:8px"></span>
+            </div>
+          </div>
           <div id="terminal-scripts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
             <span class="meta" style="font-size:13px;color:var(--text-muted)">暂无保存的脚本</span>
           </div>
@@ -693,6 +715,14 @@
                 <option value="20">Node 20</option>
                 <option value="22">Node 22</option>
                 <option value="24">Node 24</option>
+              </select>
+              <select id="term-python" style="width:140px;padding:6px 10px;font-size:13px">
+                <option value="" selected>默认 Python</option>
+                <option value="3.8">Python 3.8</option>
+                <option value="3.9">Python 3.9</option>
+                <option value="3.10">Python 3.10</option>
+                <option value="3.11">Python 3.11</option>
+                <option value="3.12">Python 3.12</option>
               </select>
             </div>
             <span class="meta" style="font-size:12px">路径: <span id="terminal-path"></span></span>

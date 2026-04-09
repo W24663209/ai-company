@@ -12,9 +12,10 @@ router = APIRouter()
 @router.post("/java/{project_id}")
 def build_java(
     project_id: str,
-    jdk_version: str = "17",
+    jdk_version: str | None = None,
     command: list[str] | None = Query(None),
 ):
+    """Build Java project. Uses environment config if jdk_version not provided."""
     try:
         log_path = build_service.build_project(project_id, command=command, jdk_version=jdk_version)
         return {"status": "success", "log": log_path}
@@ -29,10 +30,40 @@ def build_node(
     node_version: str | None = None,
     command: list[str] | None = Query(None),
 ):
+    """Build Node.js project. Uses environment config if node_version not provided."""
     try:
         log_path = build_service.build_project(
             project_id, command=command, tool=tool, node_version=node_version
         )
+        return {"status": "success", "log": log_path}
+    except AICompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/python/{project_id}")
+def build_python(
+    project_id: str,
+    python_version: str | None = None,
+    command: list[str] | None = Query(None),
+):
+    """Build Python project. Uses environment config if python_version not provided."""
+    try:
+        log_path = build_service.build_project(
+            project_id, command=command, python_version=python_version
+        )
+        return {"status": "success", "log": log_path}
+    except AICompanyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/auto/{project_id}")
+def build_auto(
+    project_id: str,
+    command: list[str] | None = Query(None),
+):
+    """Auto-detect build type based on project type and files. Uses environment config."""
+    try:
+        log_path = build_service.build_project(project_id, command=command)
         return {"status": "success", "log": log_path}
     except AICompanyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

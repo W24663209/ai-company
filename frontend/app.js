@@ -1068,11 +1068,18 @@ async function runBuild() {
     if (type === 'java') {
       const jdk = document.getElementById('build-jdk').value || '17';
       url = `/builds/java/${currentProject.id}?jdk_version=${encodeURIComponent(jdk)}`;
-    } else {
+    } else if (type === 'node') {
       const tool = cmdParts ? cmdParts[0] : 'npm';
       const nodeVer = document.getElementById('build-node').value || undefined;
       url = `/builds/node/${currentProject.id}?tool=${encodeURIComponent(tool)}`;
       if (nodeVer) url += `&node_version=${encodeURIComponent(nodeVer)}`;
+    } else if (type === 'python') {
+      const pythonVer = document.getElementById('build-python').value || undefined;
+      url = `/builds/python/${currentProject.id}`;
+      if (pythonVer) url += `?python_version=${encodeURIComponent(pythonVer)}`;
+    } else {
+      // Auto mode - uses environment config
+      url = `/builds/auto/${currentProject.id}`;
     }
     if (cmdParts) {
       url += cmdParts.map(c => '&command=' + encodeURIComponent(c)).join('');
@@ -1094,42 +1101,107 @@ function applyQuickBuild() {
   }
 }
 
-function updateBuildOptions() {
+async function updateBuildOptions() {
+  if (!currentProject) return;
+
+  // Load environment config
+  const project = await api('GET', '/projects/' + currentProject.id);
+  const envName = project.active_environment || 'default';
+  const environments = project.environments || [];
+  const env = environments.find(e => e.name === envName) || {};
+
+  // Update environment display
+  document.getElementById('build-current-env').textContent = envName === 'default' ? '默认环境' : envName;
+
+  // Show runtime versions from environment
+  const runtimes = env.runtime_versions || [];
+  const runtimeText = runtimes.map(rv => {
+    const icons = { node: '🟢', python: '🐍', java: '☕' };
+    return `${icons[rv.runtime] || ''} ${rv.runtime} ${rv.version}`;
+  }).join(' | ');
+  document.getElementById('build-env-runtimes').textContent = runtimeText ? `(${runtimeText})` : '';
+
+  // Set runtime version selects based on environment
+  runtimes.forEach(rv => {
+    if (rv.runtime === 'node') {
+      document.getElementById('build-node').value = rv.version;
+    } else if (rv.runtime === 'java') {
+      document.getElementById('build-jdk').value = rv.version;
+    } else if (rv.runtime === 'python') {
+      document.getElementById('build-python').value = rv.version;
+    }
+  });
+
   const type = document.getElementById('build-type').value;
   const quick = document.getElementById('build-quick');
   const jdk = document.getElementById('build-jdk');
   const node = document.getElementById('build-node');
+  const python = document.getElementById('build-python');
+
   if (type === 'java') {
     jdk.style.display = '';
     node.style.display = 'none';
+    python.style.display = 'none';
   } else if (type === 'node') {
     jdk.style.display = 'none';
     node.style.display = '';
+    python.style.display = 'none';
+  } else if (type === 'python') {
+    jdk.style.display = 'none';
+    node.style.display = 'none';
+    python.style.display = '';
   } else {
     jdk.style.display = 'none';
     node.style.display = 'none';
+    python.style.display = 'none';
   }
-  const javaOpts = [
-    ['mvn clean install', 'mvn clean install'],
-    ['mvn clean compile', 'mvn clean compile'],
-    ['mvn test', 'mvn test'],
-    ['mvn package -DskipTests', 'mvn package -DskipTests'],
-    ['mvn clean', 'mvn clean']
-  ];
-  const nodeOpts = [
-    ['npm install', 'npm install'],
-    ['npm run build', 'npm run build'],
-    ['npm run dev', 'npm run dev'],
-    ['npm test', 'npm test'],
-    ['pnpm install', 'pnpm install'],
-    ['pnpm run build', 'pnpm run build']
-  ];
-  let opts;
-  if (type === 'java') opts = javaOpts;
-  else opts = nodeOpts;
+
+  // Use custom build commands from environment if available
+  const envCommands = env.build_commands || [];
+  let opts = [];
+
+  if (envCommands.length > 0) {
+    // Use environment commands
+    opts = envCommands.map(cmd => [cmd, cmd]);
+  } else {
+    // Default options
+    const javaOpts = [
+      ['mvn clean install', 'mvn clean install'],
+      ['mvn clean compile', 'mvn clean compile'],
+      ['mvn test', 'mvn test'],
+      ['mvn package -DskipTests', 'mvn package -DskipTests'],
+      ['mvn clean', 'mvn clean']
+    ];
+    const nodeOpts = [
+      ['npm install', 'npm install'],
+      ['npm run build', 'npm run build'],
+      ['npm run dev', 'npm run dev'],
+      ['npm test', 'npm test'],
+      ['pnpm install', 'pnpm install'],
+      ['pnpm run build', 'pnpm run build']
+    ];
+    const pythonOpts = [
+      ['pip install -e .', 'pip install -e .'],
+      ['pip install -r requirements.txt', 'pip install -r requirements.txt'],
+      ['python -m pytest', 'python -m pytest'],
+      ['python setup.py install', 'python setup.py install'],
+      ['poetry install', 'poetry install']
+    ];
+
+    if (type === 'java') opts = javaOpts;
+    else if (type === 'node') opts = nodeOpts;
+    else if (type === 'python') opts = pythonOpts;
+    else opts = [...javaOpts, ...nodeOpts, ...pythonOpts];
+  }
+
   let html = '<option value="">-- 快捷指令 --</option>';
   opts.forEach(o => { html += `<option value="${o[0]}">${o[1]}</option>`; });
   quick.innerHTML = html;
+
+  // Pre-fill custom command if there's a default build command in environment
+  if (envCommands.length > 0 && !document.getElementById('build-cmd').value) {
+    document.getElementById('build-cmd').value = envCommands[0];
+  }
 }
 
 // Terminal
@@ -1191,8 +1263,34 @@ function connectTerminal() {
 }
 
 
-function _doConnectTerminal() {
+async function _doConnectTerminal() {
   document.getElementById('terminal-path').textContent = currentProject.path;
+
+  // Load environment config and update display
+  const project = await api('GET', '/projects/' + currentProject.id);
+  const envName = project.active_environment || 'default';
+  const environments = project.environments || [];
+  const env = environments.find(e => e.name === envName) || {};
+
+  // Update terminal environment display
+  document.getElementById('term-current-env').textContent = envName === 'default' ? '默认环境' : envName;
+  const runtimes = env.runtime_versions || [];
+  const runtimeText = runtimes.map(rv => {
+    const icons = { node: '🟢', python: '🐍', java: '☕' };
+    return `${icons[rv.runtime] || ''} ${rv.runtime} ${rv.version}`;
+  }).join(' | ');
+  document.getElementById('term-env-runtimes').textContent = runtimeText ? `(${runtimeText})` : '';
+
+  // Set runtime selects based on environment
+  runtimes.forEach(rv => {
+    if (rv.runtime === 'node' && document.getElementById('term-node')) {
+      document.getElementById('term-node').value = rv.version;
+    } else if (rv.runtime === 'java' && document.getElementById('term-java')) {
+      document.getElementById('term-java').value = rv.version;
+    } else if (rv.runtime === 'python' && document.getElementById('term-python')) {
+      document.getElementById('term-python').value = rv.version;
+    }
+  });
 
   if (terminalSocket) {
     terminalSocket.close();
@@ -1200,8 +1298,10 @@ function _doConnectTerminal() {
 
   const javaVer = document.getElementById('term-java').value || '';
   const nodeVer = document.getElementById('term-node').value || '';
+  const pythonVer = document.getElementById('term-python')?.value || '';
   const qs = [];
   if (javaVer) qs.push('java_version=' + encodeURIComponent(javaVer));
+  if (pythonVer) qs.push('python_version=' + encodeURIComponent(pythonVer));
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${currentProject.id}` + (qs.length ? '?' + qs.join('&') : '');
