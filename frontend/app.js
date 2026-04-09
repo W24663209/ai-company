@@ -1073,6 +1073,10 @@ async function runBuild() {
       const nodeVer = document.getElementById('build-node').value || undefined;
       url = `/builds/node/${currentProject.id}?tool=${encodeURIComponent(tool)}`;
       if (nodeVer) url += `&node_version=${encodeURIComponent(nodeVer)}`;
+      // 对于 node，cmdParts[0] 是工具名，需要从 command 参数中排除
+      if (cmdParts) {
+        cmdParts = cmdParts.slice(1); // 去掉工具名
+      }
     } else if (type === 'python') {
       const pythonVer = document.getElementById('build-python').value || undefined;
       url = `/builds/python/${currentProject.id}`;
