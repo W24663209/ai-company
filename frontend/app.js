@@ -1082,7 +1082,8 @@ async function runBuild() {
       url = `/builds/auto/${currentProject.id}`;
     }
     if (cmdParts) {
-      url += cmdParts.map(c => '&command=' + encodeURIComponent(c)).join('');
+      const prefix = url.includes('?') ? '&' : '?';
+      url += prefix + cmdParts.map(c => 'command=' + encodeURIComponent(c)).join('&command=');
     }
     const res = await api('POST', url);
     const logRes = await api('GET', '/builds/log?path=' + encodeURIComponent(res.log));
