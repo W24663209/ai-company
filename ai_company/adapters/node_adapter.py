@@ -27,10 +27,11 @@ def build(
     tool: str = "npm",
     node_version: Optional[str] = None,
     env: Optional[dict[str, str]] = None,
+    working_dir: Optional[str] = None,
 ) -> tuple[int, str, str]:
-    cwd = Path(project_path)
+    cwd = Path(working_dir) if working_dir else Path(project_path)
     if not cwd.exists():
-        raise BuildError(f"Project path does not exist: {project_path}")
+        raise BuildError(f"Project path does not exist: {cwd}")
 
     resolved_tool = shutil.which(tool) or tool
     if tool == "pnpm":
