@@ -31,11 +31,29 @@ def get_active_environment(project) -> dict:
     }
 
 
-def get_runtime_version(env: dict, runtime: str) -> str | None:
-    """Get the version for a specific runtime from environment config."""
-    for rv in env.get("runtime_versions", []):
-        if rv.get("runtime") == runtime:
-            return rv.get("version")
+def get_runtime_version(env, runtime: str) -> str | None:
+    """Get the version for a specific runtime from environment config.
+
+    Args:
+        env: Either a dict or a Pydantic BuildEnvironment model
+        runtime: The runtime name (e.g., 'node', 'python', 'java')
+    """
+    # Get runtime_versions list from either dict or model
+    if isinstance(env, dict):
+        runtime_versions = env.get("runtime_versions", [])
+    else:
+        # Pydantic model
+        runtime_versions = getattr(env, "runtime_versions", [])
+
+    for rv in runtime_versions:
+        # Handle both dict and Pydantic model objects in the list
+        if isinstance(rv, dict):
+            if rv.get("runtime") == runtime:
+                return rv.get("version")
+        else:
+            # Pydantic model - access attributes directly
+            if getattr(rv, "runtime", None) == runtime:
+                return getattr(rv, "version", None)
     return None
 
 
