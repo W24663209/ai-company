@@ -28,15 +28,17 @@ def build(
     command: Optional[list[str]] = None,
     jdk_version: str = "17",
     env: Optional[dict[str, str]] = None,
+    working_dir: Optional[str] = None,
 ) -> tuple[int, str, str]:
     java_home = discover_jdk(jdk_version)
     if not java_home:
         # If no specific JDK found, rely on system default but warn
         java_home = os.environ.get("JAVA_HOME", "")
 
-    cwd = Path(project_path)
+    # Use working_dir if provided, otherwise use project_path
+    cwd = Path(working_dir) if working_dir else Path(project_path)
     if not cwd.exists():
-        raise BuildError(f"Project path does not exist: {project_path}")
+        raise BuildError(f"Project path does not exist: {cwd}")
 
     cmd = command or ["mvn", "clean", "compile"]
     if settings.maven_bin and cmd[0] == "mvn":
