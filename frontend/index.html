@@ -438,12 +438,11 @@
 
       <div class="tabs">
         <button class="tab-btn active" onclick="showProjectTab('requirements')">需求</button>
+        <button class="tab-btn" onclick="showProjectTab('terminal')">终端</button>
         <button class="tab-btn" onclick="showProjectTab('env')">环境</button>
-        <button class="tab-btn" onclick="showProjectTab('builds')">构建</button>
         <button class="tab-btn" onclick="showProjectTab('files')">文件</button>
         <button class="tab-btn" onclick="showProjectTab('shared')">共享</button>
         <button class="tab-btn" onclick="showProjectTab('database')">数据库</button>
-        <button class="tab-btn" onclick="showProjectTab('terminal')">终端</button>
         <button class="tab-btn" onclick="showProjectNetworkModal()">协作</button>
         <button class="tab-btn" onclick="showProjectTab('settings')">设置</button>
       </div>
@@ -592,96 +591,6 @@
         </div>
       </div>
 
-      <div id="panel-builds" class="panel hidden">
-        <div class="card" style="max-width:1400px;margin-left:auto;margin-right:auto">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <h3 style="margin:0">运行构建</h3>
-            <div id="build-env-info" style="font-size:13px;color:var(--primary);background:var(--surface);padding:6px 12px;border-radius:6px;border:1px solid var(--border)">
-              当前环境: <strong id="build-current-env">default</strong>
-              <span id="build-env-runtimes" style="margin-left:8px"></span>
-            </div>
-          </div>
-          <div class="form-row">
-            <select id="build-type" onchange="updateBuildOptions()">
-              <option value="auto">自动检测</option>
-              <option value="java">Java</option>
-              <option value="node">Node</option>
-              <option value="python">Python</option>
-            </select>
-            <select id="build-jdk" style="width:110px">
-              <option value="11">JDK 11</option>
-              <option value="17" selected>JDK 17</option>
-              <option value="21">JDK 21</option>
-            </select>
-            <select id="build-node" style="width:110px;display:none">
-              <option value="18">Node 18</option>
-              <option value="20" selected>Node 20</option>
-              <option value="22">Node 22</option>
-              <option value="24">Node 24</option>
-            </select>
-            <select id="build-python" style="width:110px;display:none">
-              <option value="3.8">Python 3.8</option>
-              <option value="3.9">Python 3.9</option>
-              <option value="3.10">Python 3.10</option>
-              <option value="3.11" selected>Python 3.11</option>
-              <option value="3.12">Python 3.12</option>
-            </select>
-            <select id="build-quick" style="min-width:200px" onchange="applyQuickBuild()">
-              <option value="">-- 快捷指令 --</option>
-            </select>
-          </div>
-          <div class="form-row" style="margin-top:10px">
-            <input id="build-cmd" placeholder="自定义构建命令（可覆盖快捷指令）" style="flex:1;min-width:260px">
-            <button class="btn btn-primary" onclick="runBuild()">开始构建</button>
-          </div>
-          <div id="build-log" class="log hidden" style="margin-top:16px"></div>
-        </div>
-      </div>
-
-      <div id="panel-files" class="panel hidden">
-        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px;max-width:1400px;margin-left:auto;margin-right:auto">
-          <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
-            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
-              <strong style="font-size:14px">文件浏览</strong>
-              <button class="btn btn-secondary" onclick="refreshFileTree()" style="padding:4px 10px;font-size:12px">刷新</button>
-            </div>
-            <div id="file-tree" style="flex:1;overflow:auto;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px">
-              <div class="empty" style="padding:20px 0">加载中...</div>
-            </div>
-          </div>
-          <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
-            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
-              <div id="file-breadcrumb" style="font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">未选择文件</div>
-              <button id="file-save-btn" class="btn btn-secondary" onclick="saveCurrentFile()" style="padding:6px 14px;font-size:13px;display:none">已保存</button>
-            </div>
-            <div id="file-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
-            <div id="file-meta" class="meta" style="font-size:12px;color:var(--text-muted)"></div>
-          </div>
-        </div>
-      </div>
-
-      <div id="panel-shared" class="panel hidden">
-        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px;max-width:1400px;margin-left:auto;margin-right:auto">
-          <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
-            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
-              <strong style="font-size:14px">共享目录</strong>
-              <button class="btn btn-secondary" onclick="refreshSharedTree()" style="padding:4px 10px;font-size:12px">刷新</button>
-            </div>
-            <div id="shared-tree" style="flex:1;overflow:auto;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px">
-              <div class="empty" style="padding:20px 0">加载中...</div>
-            </div>
-          </div>
-          <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
-            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
-              <div id="shared-breadcrumb" style="font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">未选择文件</div>
-              <button id="shared-save-btn" class="btn btn-secondary" onclick="saveSharedFile()" style="padding:6px 14px;font-size:13px;display:none">已保存</button>
-            </div>
-            <div id="shared-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
-            <div id="shared-meta" class="meta" style="font-size:12px;color:var(--text-muted)"></div>
-          </div>
-        </div>
-      </div>
-
       <div id="panel-terminal" class="panel hidden">
         <div class="card" style="margin-bottom:20px;max-width:1400px;margin-left:auto;margin-right:auto">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -728,6 +637,50 @@
             <span class="meta" style="font-size:12px">路径: <span id="terminal-path"></span></span>
           </div>
           <div id="terminal-container" style="flex:1;padding:8px;"></div>
+        </div>
+      </div>
+
+      <div id="panel-files" class="panel hidden">
+        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px;max-width:1400px;margin-left:auto;margin-right:auto">
+          <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
+            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <strong style="font-size:14px">文件浏览</strong>
+              <button class="btn btn-secondary" onclick="refreshFileTree()" style="padding:4px 10px;font-size:12px">刷新</button>
+            </div>
+            <div id="file-tree" style="flex:1;overflow:auto;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px">
+              <div class="empty" style="padding:20px 0">加载中...</div>
+            </div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
+            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <div id="file-breadcrumb" style="font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">未选择文件</div>
+              <button id="file-save-btn" class="btn btn-secondary" onclick="saveCurrentFile()" style="padding:6px 14px;font-size:13px;display:none">已保存</button>
+            </div>
+            <div id="file-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
+            <div id="file-meta" class="meta" style="font-size:12px;color:var(--text-muted)"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="panel-shared" class="panel hidden">
+        <div class="card" style="display:flex;gap:16px;height:820px;padding:20px;max-width:1400px;margin-left:auto;margin-right:auto">
+          <div style="width:280px;min-width:260px;display:flex;flex-direction:column;gap:10px">
+            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <strong style="font-size:14px">共享目录</strong>
+              <button class="btn btn-secondary" onclick="refreshSharedTree()" style="padding:4px 10px;font-size:12px">刷新</button>
+            </div>
+            <div id="shared-tree" style="flex:1;overflow:auto;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px">
+              <div class="empty" style="padding:20px 0">加载中...</div>
+            </div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
+            <div class="flex-between" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <div id="shared-breadcrumb" style="font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">未选择文件</div>
+              <button id="shared-save-btn" class="btn btn-secondary" onclick="saveSharedFile()" style="padding:6px 14px;font-size:13px;display:none">已保存</button>
+            </div>
+            <div id="shared-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
+            <div id="shared-meta" class="meta" style="font-size:12px;color:var(--text-muted)"></div>
+          </div>
         </div>
       </div>
 

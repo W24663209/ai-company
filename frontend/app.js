@@ -162,8 +162,13 @@ function showProjectTab(name) {
   if (btn) btn.classList.add('active');
   document.getElementById('panel-' + name).classList.remove('hidden');
   if (name === 'requirements') loadReqs();
+  if (name === 'terminal') {
+    connectTerminal();
+    renderTerminalScripts();
+  } else {
+    disconnectTerminal();
+  }
   if (name === 'env') loadEnvironmentConfig();
-  if (name === 'builds') updateBuildOptions();
   if (name === 'files') {
     loadFileTree('');
     setTimeout(() => {
@@ -175,12 +180,6 @@ function showProjectTab(name) {
     setTimeout(() => {
       if (sharedAceEditor) sharedAceEditor.resize();
     }, 50);
-  }
-  if (name === 'terminal') {
-    connectTerminal();
-    renderTerminalScripts();
-  } else {
-    disconnectTerminal();
   }
   if (name === 'settings') loadProjectSettings();
 }
@@ -1055,161 +1054,6 @@ async function saveProjectSettings() {
   }
 }
 
-async function runBuild() {
-  if (!currentProject) return;
-  const type = document.getElementById('build-type').value;
-  const cmdRaw = document.getElementById('build-cmd').value.trim();
-  const cmdParts = cmdRaw ? cmdRaw.split(/\s+/) : null;
-  const logEl = document.getElementById('build-log');
-  logEl.classList.remove('hidden');
-  logEl.textContent = '构建中...';
-  try {
-    let url = '';
-    if (type === 'java') {
-      const jdk = document.getElementById('build-jdk').value || '17';
-      url = `/builds/java/${currentProject.id}?jdk_version=${encodeURIComponent(jdk)}`;
-    } else if (type === 'node') {
-      const tool = cmdParts ? cmdParts[0] : 'npm';
-      const nodeVer = document.getElementById('build-node').value || undefined;
-      url = `/builds/node/${currentProject.id}?tool=${encodeURIComponent(tool)}`;
-      if (nodeVer) url += `&node_version=${encodeURIComponent(nodeVer)}`;
-      // 对于 node，cmdParts[0] 是工具名，需要从 command 参数中排除
-      if (cmdParts) {
-        cmdParts = cmdParts.slice(1); // 去掉工具名
-      }
-    } else if (type === 'python') {
-      const pythonVer = document.getElementById('build-python').value || undefined;
-      url = `/builds/python/${currentProject.id}`;
-      if (pythonVer) url += `?python_version=${encodeURIComponent(pythonVer)}`;
-    } else {
-      // Auto mode - uses environment config
-      url = `/builds/auto/${currentProject.id}`;
-    }
-    if (cmdParts) {
-      const prefix = url.includes('?') ? '&' : '?';
-      url += prefix + cmdParts.map(c => 'command=' + encodeURIComponent(c)).join('&command=');
-    }
-    const res = await api('POST', url);
-    const logRes = await api('GET', '/builds/log?path=' + encodeURIComponent(res.log));
-    logEl.textContent = logRes.content || '(无日志内容)';
-    toast('构建成功');
-  } catch (e) {
-    logEl.textContent = '构建失败: ' + e.message;
-    toast('构建失败');
-  }
-}
-
-function applyQuickBuild() {
-  const quick = document.getElementById('build-quick').value;
-  if (quick) {
-    document.getElementById('build-cmd').value = quick;
-  }
-}
-
-async function updateBuildOptions() {
-  if (!currentProject) return;
-
-  // Load environment config
-  const project = await api('GET', '/projects/' + currentProject.id);
-  const envName = project.active_environment || 'default';
-  const environments = project.environments || [];
-  const env = environments.find(e => e.name === envName) || {};
-
-  // Update environment display
-  document.getElementById('build-current-env').textContent = envName === 'default' ? '默认环境' : envName;
-
-  // Show runtime versions from environment
-  const runtimes = env.runtime_versions || [];
-  const runtimeText = runtimes.map(rv => {
-    const icons = { node: '🟢', python: '🐍', java: '☕' };
-    return `${icons[rv.runtime] || ''} ${rv.runtime} ${rv.version}`;
-  }).join(' | ');
-  document.getElementById('build-env-runtimes').textContent = runtimeText ? `(${runtimeText})` : '';
-
-  // Set runtime version selects based on environment
-  runtimes.forEach(rv => {
-    if (rv.runtime === 'node') {
-      document.getElementById('build-node').value = rv.version;
-    } else if (rv.runtime === 'java') {
-      document.getElementById('build-jdk').value = rv.version;
-    } else if (rv.runtime === 'python') {
-      document.getElementById('build-python').value = rv.version;
-    }
-  });
-
-  const type = document.getElementById('build-type').value;
-  const quick = document.getElementById('build-quick');
-  const jdk = document.getElementById('build-jdk');
-  const node = document.getElementById('build-node');
-  const python = document.getElementById('build-python');
-
-  if (type === 'java') {
-    jdk.style.display = '';
-    node.style.display = 'none';
-    python.style.display = 'none';
-  } else if (type === 'node') {
-    jdk.style.display = 'none';
-    node.style.display = '';
-    python.style.display = 'none';
-  } else if (type === 'python') {
-    jdk.style.display = 'none';
-    node.style.display = 'none';
-    python.style.display = '';
-  } else {
-    jdk.style.display = 'none';
-    node.style.display = 'none';
-    python.style.display = 'none';
-  }
-
-  // Use custom build commands from environment if available
-  const envCommands = env.build_commands || [];
-  let opts = [];
-
-  if (envCommands.length > 0) {
-    // Use environment commands
-    opts = envCommands.map(cmd => [cmd, cmd]);
-  } else {
-    // Default options
-    const javaOpts = [
-      ['mvn clean install', 'mvn clean install'],
-      ['mvn clean compile', 'mvn clean compile'],
-      ['mvn test', 'mvn test'],
-      ['mvn package -DskipTests', 'mvn package -DskipTests'],
-      ['mvn clean', 'mvn clean']
-    ];
-    const nodeOpts = [
-      ['npm install', 'npm install'],
-      ['npm run build', 'npm run build'],
-      ['npm run dev', 'npm run dev'],
-      ['npm test', 'npm test'],
-      ['pnpm install', 'pnpm install'],
-      ['pnpm run build', 'pnpm run build']
-    ];
-    const pythonOpts = [
-      ['pip install -e .', 'pip install -e .'],
-      ['pip install -r requirements.txt', 'pip install -r requirements.txt'],
-      ['python -m pytest', 'python -m pytest'],
-      ['python setup.py install', 'python setup.py install'],
-      ['poetry install', 'poetry install']
-    ];
-
-    if (type === 'java') opts = javaOpts;
-    else if (type === 'node') opts = nodeOpts;
-    else if (type === 'python') opts = pythonOpts;
-    else opts = [...javaOpts, ...nodeOpts, ...pythonOpts];
-  }
-
-  let html = '<option value="">-- 快捷指令 --</option>';
-  opts.forEach(o => { html += `<option value="${o[0]}">${o[1]}</option>`; });
-  quick.innerHTML = html;
-
-  // Pre-fill custom command if there's a default build command in environment
-  if (envCommands.length > 0 && !document.getElementById('build-cmd').value) {
-    document.getElementById('build-cmd').value = envCommands[0];
-  }
-}
-
-// Terminal
 let term = null;
 let fitAddon = null;
 let terminalSocket = null;
@@ -1501,7 +1345,6 @@ function runTerminalScript(idx) {
   }
 }
 
-document.getElementById('build-type').addEventListener('change', updateBuildOptions);
 
 document.getElementById('term-java').addEventListener('change', () => {
   if (!document.getElementById('panel-terminal').classList.contains('hidden')) connectTerminal();
@@ -1511,7 +1354,6 @@ document.getElementById('term-node').addEventListener('change', () => {
 });
 
 // init
-updateBuildOptions();
 loadProjects();
 loadSshKeys();
 

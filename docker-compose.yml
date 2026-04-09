@@ -7,6 +7,7 @@ services:
     container_name: ai-company
     ports:
       - "8888:8080"
+      - "30000-31000:30000-31000"
     volumes:
       - ./data:/app/data
       - ./workspace:/app/workspace
