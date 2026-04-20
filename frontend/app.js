@@ -5770,29 +5770,16 @@ window.addBuildCommand = addBuildCommand;
 window.addEnvVar = addEnvVar;
 window.browseBuildDir = browseBuildDir;
 window.saveEnvironmentConfig = saveEnvironmentConfig;
-
-// ============================================
-// Global Claude Settings (~/.claude/settings.json)
-// ============================================
-
-let globalSettingsEditor = null;
-
-function openGlobalSettingsModal() {
-  document.getElementById('global-settings-modal').classList.add('show');
-  loadGlobalSettings();
-}
-
-function closeGlobalSettingsModal() {
-  document.getElementById('global-settings-modal').classList.remove('show');
-}
-
-async function loadGlobalSettings() {
-  try {
-    const response = await api('GET', '/global-settings');
+    
     const content = response.content || '{}\n';
     
     // Initialize Ace editor if not already
     if (!globalSettingsEditor) {
+      const editorEl = document.getElementById('global-settings-editor');
+      if (!editorEl) {
+        throw new Error('Editor element not found');
+      }
+      
       globalSettingsEditor = ace.edit('global-settings-editor');
       globalSettingsEditor.setTheme('ace/theme/textmate');
       globalSettingsEditor.session.setMode('ace/mode/json');
@@ -5800,15 +5787,19 @@ async function loadGlobalSettings() {
         fontSize: 14,
         showPrintMargin: false,
         tabSize: 2,
-        useSoftTabs: true
+        useSoftTabs: true,
+        minLines: 20,
+        maxLines: 50
       });
     }
     
     globalSettingsEditor.setValue(content, -1);
-    document.getElementById('global-settings-error').style.display = 'none';
+    globalSettingsEditor.clearSelection();
+    errorEl.style.display = 'none';
   } catch (e) {
     console.error('Failed to load global settings:', e);
-    toast('加载配置失败: ' + (e.message || '未知错误'));
+    errorEl.textContent = '加载配置失败: ' + (e.message || '未知错误');
+    errorEl.style.display = 'block';
   }
 }
 
@@ -5828,9 +5819,14 @@ async function saveGlobalSettings() {
   }
   
   try {
-    await api('POST', '/global-settings', { content });
+    const response = await api('POST', '/global-settings', { content });
+    
+    if (response.error) {
+      throw new Error(response.error);
+    }
+    
     errorEl.style.display = 'none';
-    toast('全局配置已保存');
+    toast('全局配置已保存到 ~/.claude/settings.json');
     closeGlobalSettingsModal();
   } catch (e) {
     console.error('Failed to save global settings:', e);
