@@ -1242,6 +1242,8 @@ function renderTerminalScripts() {
       <div style="display:flex;align-items:center;gap:8px;background:var(--bg);padding:10px 12px;border-radius:8px;border:1px solid var(--border);width:100%">
         <span style="font-size:13px;font-weight:600;min-width:80px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.name)}</span>
         <code style="flex:1;min-width:200px;font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.cmd)}</code>
+        <button class="btn btn-ghost" onclick="moveTerminalScriptUp(${idx})" style="padding:4px 8px;font-size:12px" title="上移" ${idx === 0 ? 'disabled style="padding:4px 8px;font-size:12px;opacity:0.3;cursor:not-allowed"' : ''}>↑</button>
+        <button class="btn btn-ghost" onclick="moveTerminalScriptDown(${idx})" style="padding:4px 8px;font-size:12px" title="下移" ${idx === scripts.length - 1 ? 'disabled style="padding:4px 8px;font-size:12px;opacity:0.3;cursor:not-allowed"' : ''}>↓</button>
         <button class="btn btn-primary" onclick="runTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">执行</button>
         <button class="btn btn-secondary" onclick="editTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">修改</button>
         <button class="btn btn-danger" onclick="deleteTerminalScript(${idx})" style="padding:4px 8px;font-size:12px">×</button>
@@ -1307,6 +1309,26 @@ async function saveEditTerminalScript(idx) {
   await saveTerminalScripts(scripts);
   renderTerminalScripts();
   toast('脚本已更新');
+}
+
+async function moveTerminalScriptUp(idx) {
+  if (!currentProject) return;
+  const scripts = currentProject.scripts || [];
+  if (idx <= 0 || idx >= scripts.length) return;
+  // Swap with previous item
+  [scripts[idx - 1], scripts[idx]] = [scripts[idx], scripts[idx - 1]];
+  await saveTerminalScripts(scripts);
+  renderTerminalScripts();
+}
+
+async function moveTerminalScriptDown(idx) {
+  if (!currentProject) return;
+  const scripts = currentProject.scripts || [];
+  if (idx < 0 || idx >= scripts.length - 1) return;
+  // Swap with next item
+  [scripts[idx], scripts[idx + 1]] = [scripts[idx + 1], scripts[idx]];
+  await saveTerminalScripts(scripts);
+  renderTerminalScripts();
 }
 
 function runTerminalScript(idx) {
