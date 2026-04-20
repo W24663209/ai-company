@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from ai_company.api.routers import agent_messages, agents, database, files, git, project_links, project_messages, projects, requirements, skills, terminal
+from ai_company.api.routers import agent_messages, agents, database, files, git, global_settings, project_links, project_messages, projects, requirements, skills, terminal
 from ai_company.core.config import settings
 
 create_app = None
@@ -31,6 +31,8 @@ def create_app_instance() -> FastAPI:
     app.include_router(database.router, prefix="/db", tags=["database"])
     app.include_router(agent_messages.router, prefix="/agents", tags=["agent_messages"])
     app.include_router(project_messages.router, prefix="/messages", tags=["project_messages"])
+
+    app.include_router(global_settings.router, tags=["global_settings"])
 
     @app.get("/health")
     def health() -> dict[str, str]:

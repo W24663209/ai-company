@@ -374,7 +374,8 @@
   <div class="container">
     <header>
       <h1>AI Company</h1>
-      <div id="header-actions">
+      <div id="header-actions" style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="openGlobalSettingsModal()">全局配置</button>
         <button class="btn btn-secondary" onclick="openSshModal()">SSH 密钥</button>
       </div>
     </header>
@@ -807,6 +808,25 @@
   </div>
 
   <div id="toast"></div>
+
+  <!-- Global Settings Modal -->
+  <div id="global-settings-modal" class="modal-overlay" onclick="if(event.target===this)closeGlobalSettingsModal()">
+    <div class="modal" style="max-width:1000px;max-height:92vh;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <h3 style="margin:0">全局 Claude 配置 (~/.claude/settings.json)</h3>
+        <button class="btn btn-ghost" onclick="closeGlobalSettingsModal()" style="padding:4px 10px">关闭</button>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:12px;padding:16px;overflow:hidden">
+        <p class="meta" style="font-size:13px;color:var(--text-muted);margin:0">编辑全局 Claude Code 配置文件。此配置会影响所有项目的 Claude Code 行为。</p>
+        <div id="global-settings-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
+        <div id="global-settings-error" style="color:#dc2626;font-size:13px;display:none"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border);padding-top:12px">
+          <button class="btn btn-secondary" onclick="loadGlobalSettings()">重置</button>
+          <button class="btn btn-primary" onclick="saveGlobalSettings()">保存配置</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- SSH Modal -->
   <div id="ssh-modal" class="modal-overlay" onclick="if(event.target===this)closeSshModal()">

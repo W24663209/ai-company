@@ -5770,3 +5770,77 @@ window.addBuildCommand = addBuildCommand;
 window.addEnvVar = addEnvVar;
 window.browseBuildDir = browseBuildDir;
 window.saveEnvironmentConfig = saveEnvironmentConfig;
+
+// ============================================
+// Global Claude Settings (~/.claude/settings.json)
+// ============================================
+
+let globalSettingsEditor = null;
+
+function openGlobalSettingsModal() {
+  document.getElementById('global-settings-modal').classList.add('show');
+  loadGlobalSettings();
+}
+
+function closeGlobalSettingsModal() {
+  document.getElementById('global-settings-modal').classList.remove('show');
+}
+
+async function loadGlobalSettings() {
+  try {
+    const response = await api('GET', '/global-settings');
+    const content = response.content || '{}\n';
+    
+    // Initialize Ace editor if not already
+    if (!globalSettingsEditor) {
+      globalSettingsEditor = ace.edit('global-settings-editor');
+      globalSettingsEditor.setTheme('ace/theme/textmate');
+      globalSettingsEditor.session.setMode('ace/mode/json');
+      globalSettingsEditor.setOptions({
+        fontSize: 14,
+        showPrintMargin: false,
+        tabSize: 2,
+        useSoftTabs: true
+      });
+    }
+    
+    globalSettingsEditor.setValue(content, -1);
+    document.getElementById('global-settings-error').style.display = 'none';
+  } catch (e) {
+    console.error('Failed to load global settings:', e);
+    toast('加载配置失败: ' + (e.message || '未知错误'));
+  }
+}
+
+async function saveGlobalSettings() {
+  if (!globalSettingsEditor) return;
+  
+  const content = globalSettingsEditor.getValue();
+  const errorEl = document.getElementById('global-settings-error');
+  
+  // Validate JSON
+  try {
+    JSON.parse(content);
+  } catch (e) {
+    errorEl.textContent = 'JSON 格式错误: ' + e.message;
+    errorEl.style.display = 'block';
+    return;
+  }
+  
+  try {
+    await api('POST', '/global-settings', { content });
+    errorEl.style.display = 'none';
+    toast('全局配置已保存');
+    closeGlobalSettingsModal();
+  } catch (e) {
+    console.error('Failed to save global settings:', e);
+    errorEl.textContent = '保存失败: ' + (e.message || '未知错误');
+    errorEl.style.display = 'block';
+  }
+}
+
+// Make functions available globally
+window.openGlobalSettingsModal = openGlobalSettingsModal;
+window.closeGlobalSettingsModal = closeGlobalSettingsModal;
+window.loadGlobalSettings = loadGlobalSettings;
+window.saveGlobalSettings = saveGlobalSettings;
