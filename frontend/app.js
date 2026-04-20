@@ -5770,6 +5770,32 @@ window.addBuildCommand = addBuildCommand;
 window.addEnvVar = addEnvVar;
 window.browseBuildDir = browseBuildDir;
 window.saveEnvironmentConfig = saveEnvironmentConfig;
+
+// ============================================
+// Global Claude Settings (~/.claude/settings.json)
+// ============================================
+
+let globalSettingsEditor = null;
+
+function openGlobalSettingsModal() {
+  document.getElementById('global-settings-modal').classList.add('show');
+  // Delay editor initialization until modal is visible
+  setTimeout(() => loadGlobalSettings(), 100);
+}
+
+function closeGlobalSettingsModal() {
+  document.getElementById('global-settings-modal').classList.remove('show');
+}
+
+async function loadGlobalSettings() {
+  const errorEl = document.getElementById('global-settings-error');
+  
+  try {
+    const response = await api('GET', '/global-settings');
+    
+    if (response.error) {
+      throw new Error(response.error);
+    }
     
     const content = response.content || '{}\n';
     
