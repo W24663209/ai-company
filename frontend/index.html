@@ -1188,6 +1188,120 @@
   </div>
 
   <script>
+    // Global Settings functions - inline to ensure availability
+    let globalSettingsEditor = null;
+
+    function openGlobalSettingsModal() {
+      const modal = document.getElementById('global-settings-modal');
+      if (modal) {
+        modal.classList.add('show');
+        setTimeout(() => loadGlobalSettings(), 150);
+      }
+    }
+
+    function closeGlobalSettingsModal() {
+      const modal = document.getElementById('global-settings-modal');
+      if (modal) modal.classList.remove('show');
+    }
+
+    async function loadGlobalSettings() {
+      const errorEl = document.getElementById('global-settings-error');
+
+      try {
+        console.log('[GlobalSettings] Loading...');
+        const response = await api('GET', '/global-settings');
+        console.log('[GlobalSettings] Response:', response);
+
+        let content = '';
+        if (response && response.content) {
+          content = response.content;
+        } else if (typeof response === 'string') {
+          content = response;
+        } else {
+          content = JSON.stringify(response, null, 2);
+        }
+
+        if (!content || content === '{}' || content === '{}\n') {
+          content = '{\n  "env": {},\n  "permissions": {\n    "allow": []\n  },\n  "skipDangerousModePermissionPrompt": false\n}\n';
+        }
+
+        // Initialize Ace editor
+        if (!globalSettingsEditor) {
+          const editorEl = document.getElementById('global-settings-editor');
+          if (!editorEl) throw new Error('Editor element not found');
+
+          globalSettingsEditor = ace.edit('global-settings-editor');
+          globalSettingsEditor.setTheme('ace/theme/textmate');
+          globalSettingsEditor.session.setMode('ace/mode/json');
+          globalSettingsEditor.setOptions({
+            fontSize: 14,
+            showPrintMargin: false,
+            tabSize: 2,
+            useSoftTabs: true,
+            minLines: 20,
+            maxLines: 50
+          });
+        }
+
+        globalSettingsEditor.setValue(content, -1);
+        globalSettingsEditor.clearSelection();
+        if (errorEl) errorEl.style.display = 'none';
+        console.log('[GlobalSettings] Loaded successfully');
+      } catch (e) {
+        console.error('[GlobalSettings] Failed:', e);
+        if (errorEl) {
+          errorEl.textContent = '加载失败: ' + (e.message || '未知错误');
+          errorEl.style.display = 'block';
+        }
+        // Init with default on error
+        if (!globalSettingsEditor) {
+          globalSettingsEditor = ace.edit('global-settings-editor');
+          globalSettingsEditor.setTheme('ace/theme/textmate');
+          globalSettingsEditor.session.setMode('ace/mode/json');
+          globalSettingsEditor.setOptions({
+            fontSize: 14,
+            showPrintMargin: false,
+            tabSize: 2,
+            useSoftTabs: true,
+            minLines: 20,
+            maxLines: 50
+          });
+        }
+        globalSettingsEditor.setValue('{\n  "env": {},\n  "permissions": {\n    "allow": []\n  }\n}', -1);
+      }
+    }
+
+    async function saveGlobalSettings() {
+      if (!globalSettingsEditor) return;
+
+      const content = globalSettingsEditor.getValue();
+      const errorEl = document.getElementById('global-settings-error');
+
+      try {
+        JSON.parse(content);
+      } catch (e) {
+        if (errorEl) {
+          errorEl.textContent = 'JSON 格式错误: ' + e.message;
+          errorEl.style.display = 'block';
+        }
+        return;
+      }
+
+      try {
+        await api('POST', '/global-settings', { content });
+        if (errorEl) errorEl.style.display = 'none';
+        toast('配置已保存');
+        closeGlobalSettingsModal();
+      } catch (e) {
+        console.error('[GlobalSettings] Save failed:', e);
+        if (errorEl) {
+          errorEl.textContent = '保存失败: ' + (e.message || '未知错误');
+          errorEl.style.display = 'block';
+        }
+      }
+    }
+
+    // Load app.js
     const s = document.createElement('script');
     s.src = 'app.js?v=' + Date.now();
     document.body.appendChild(s);
