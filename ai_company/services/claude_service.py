@@ -20,6 +20,55 @@ SSH_DIR = settings.data_dir / "ssh"
 _session_locks: dict[str, threading.Lock] = {}
 
 
+def _resolve_claude_bin() -> str:
+    """Resolve claude executable to an absolute path accessible by the runtime user.
+
+    In Docker, /usr/local/bin/claude may be a symlink to /root/.nvm/... which
+    the non-root user cannot traverse.  We prefer /home/claudeuser/.nvm paths.
+    """
+    import shutil
+
+    # 1. Try PATH lookup
+    path = shutil.which("claude")
+    if path:
+        resolved = Path(path).resolve()
+        if resolved.exists() and "/root/" not in str(resolved):
+            return str(resolved)
+
+    # 2. Try claudeuser's nvm installations
+    nvm_base = Path("/home/claudeuser/.nvm/versions/node")
+    if nvm_base.exists():
+        for v_dir in sorted(nvm_base.glob("v*/bin/claude"), reverse=True):
+            if v_dir.exists():
+                return str(v_dir)
+
+    # 3. Fallback to configured setting (may still fail with PermissionError)
+    return settings.claude_bin
+
+
+def _run_claude(
+    claude_cmd: list[str],
+    prompt: str,
+    cwd: str,
+    env: dict[str, str],
+) -> dict[str, str | int]:
+    """Synchronous wrapper for running Claude."""
+    result = subprocess.run(
+        claude_cmd,
+        input=prompt,
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    return {
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "returncode": result.returncode,
+    }
+
+
 def _get_session_lock(key: str) -> threading.Lock:
     if key not in _session_locks:
         _session_locks[key] = threading.Lock()
@@ -208,7 +257,7 @@ def launch_claude(
 
     try:
         claude_cmd = [
-            settings.claude_bin,
+            _resolve_claude_bin(),
             "--permission-mode", "bypassPermissions",
         ]
         settings_path = _get_claude_settings_path(project)
@@ -229,7 +278,7 @@ def launch_claude(
         return process
     except FileNotFoundError as exc:
         raise AICompanyError(
-            f"Claude CLI not found at '{settings.claude_bin}'. Is Claude Code installed?"
+            f"Claude CLI not found at '{_resolve_claude_bin()}'. Is Claude Code installed?"
         ) from exc
 
 
@@ -423,7 +472,7 @@ def chat(
 
     def make_cmd(session_id: str | None, is_resume: bool) -> list[str]:
         cmd = [
-            settings.claude_bin,
+            _resolve_claude_bin(),
             "-p",
             "--print",
             "--output-format",
@@ -529,7 +578,7 @@ async def chat_stream(
 
     def make_cmd(session_id: str | None, is_resume: bool) -> list[str]:
         cmd = [
-            settings.claude_bin,
+            _resolve_claude_bin(),
             "-p",
             "--print",
             "--output-format",
