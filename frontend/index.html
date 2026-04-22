@@ -818,7 +818,7 @@
       </div>
       <div style="flex:1;display:flex;flex-direction:column;gap:12px;padding:16px;overflow:hidden">
         <p class="meta" style="font-size:13px;color:var(--text-muted);margin:0">编辑全局 Claude Code 配置文件。此配置会影响所有项目的 Claude Code 行为。</p>
-        <div id="global-settings-editor" style="flex:1;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
+        <div id="global-settings-editor" style="flex:1;min-height:300px;border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
         <div id="global-settings-error" style="color:#dc2626;font-size:13px;display:none"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border);padding-top:12px">
           <button class="btn btn-secondary" onclick="loadGlobalSettings()">重置</button>
@@ -1195,7 +1195,7 @@
       const modal = document.getElementById('global-settings-modal');
       if (modal) {
         modal.classList.add('show');
-        setTimeout(() => loadGlobalSettings(), 150);
+        setTimeout(() => loadGlobalSettings(), 250);
       }
     }
 
@@ -1251,6 +1251,7 @@
 
         globalSettingsEditor.setValue(content, -1);
         globalSettingsEditor.clearSelection();
+        globalSettingsEditor.resize();
         if (errorEl) errorEl.style.display = 'none';
         console.log('[GlobalSettings] Loaded successfully');
       } catch (e) {
@@ -1274,6 +1275,7 @@
           });
         }
         globalSettingsEditor.setValue('{\n  "env": {},\n  "permissions": {\n    "allow": []\n  }\n}', -1);
+        globalSettingsEditor.resize();
       }
     }
 
