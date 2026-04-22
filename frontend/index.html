@@ -1207,6 +1207,12 @@
     async function loadGlobalSettings() {
       const errorEl = document.getElementById('global-settings-error');
 
+      if (typeof api !== 'function') {
+        console.log('[GlobalSettings] api not ready, retrying...');
+        setTimeout(() => loadGlobalSettings(), 100);
+        return;
+      }
+
       try {
         console.log('[GlobalSettings] Loading...');
         const response = await api('GET', '/global-settings');
@@ -1273,6 +1279,11 @@
 
     async function saveGlobalSettings() {
       if (!globalSettingsEditor) return;
+
+      if (typeof api !== 'function') {
+        console.warn('[GlobalSettings] api not ready');
+        return;
+      }
 
       const content = globalSettingsEditor.getValue();
       const errorEl = document.getElementById('global-settings-error');
