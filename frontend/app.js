@@ -1122,13 +1122,15 @@ async function _doConnectTerminal() {
   const env = environments.find(e => e.name === envName) || {};
 
   // Update terminal environment display
-  document.getElementById('term-current-env').textContent = envName === 'default' ? '默认环境' : envName;
+  const termCurrentEnv = document.getElementById('term-current-env');
+  if (termCurrentEnv) termCurrentEnv.textContent = envName === 'default' ? '默认环境' : envName;
   const runtimes = env.runtime_versions || [];
   const runtimeText = runtimes.map(rv => {
     const icons = { node: '🟢', python: '🐍', java: '☕' };
     return `${icons[rv.runtime] || ''} ${rv.runtime} ${rv.version}`;
   }).join(' | ');
-  document.getElementById('term-env-runtimes').textContent = runtimeText ? `(${runtimeText})` : '';
+  const termEnvRuntimes = document.getElementById('term-env-runtimes');
+  if (termEnvRuntimes) termEnvRuntimes.textContent = runtimeText ? `(${runtimeText})` : '';
 
   // Set runtime selects based on environment
   runtimes.forEach(rv => {
@@ -1239,9 +1241,8 @@ function renderTerminalScripts() {
       `;
     }
     return `
-      <div style="display:flex;align-items:center;gap:8px;background:var(--bg);padding:10px 12px;border-radius:8px;border:1px solid var(--border);width:100%">
-        <span style="font-size:13px;font-weight:600;min-width:80px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.name)}</span>
-        <code style="flex:1;min-width:200px;font-size:13px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.cmd)}</code>
+      <div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
+        <span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.name)}</span>
         <button class="btn btn-ghost" onclick="moveTerminalScriptUp(${idx})" style="padding:4px 8px;font-size:12px" title="上移" ${idx === 0 ? 'disabled style="padding:4px 8px;font-size:12px;opacity:0.3;cursor:not-allowed"' : ''}>↑</button>
         <button class="btn btn-ghost" onclick="moveTerminalScriptDown(${idx})" style="padding:4px 8px;font-size:12px" title="下移" ${idx === scripts.length - 1 ? 'disabled style="padding:4px 8px;font-size:12px;opacity:0.3;cursor:not-allowed"' : ''}>↓</button>
         <button class="btn btn-primary" onclick="runTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">执行</button>
