@@ -1241,13 +1241,15 @@ function renderTerminalScripts() {
       `;
     }
     return `
-      <div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
-        <span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(s.name)}</span>
-        <button class="btn btn-ghost" onclick="moveTerminalScriptUp(${idx})" style="padding:4px 8px;font-size:12px" title="上移" ${idx === 0 ? 'disabled style="padding:4px 8px;font-size:12px;opacity:0.3;cursor:not-allowed"' : ''}>↑</button>
-        <button class="btn btn-ghost" onclick="moveTerminalScriptDown(${idx})" style="padding:4px 8px;font-size:12px" title="下移" ${idx === scripts.length - 1 ? 'disabled style="padding:4px 8px;font-size:12px;opacity:0.3;cursor:not-allowed"' : ''}>↓</button>
-        <button class="btn btn-primary" onclick="runTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">执行</button>
-        <button class="btn btn-secondary" onclick="editTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">修改</button>
-        <button class="btn btn-danger" onclick="deleteTerminalScript(${idx})" style="padding:4px 8px;font-size:12px">×</button>
+      <div style="display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
+        <span style="font-size:13px;font-weight:600;word-break:break-all">${escapeHtml(s.name)}</span>
+        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+          <button class="btn btn-ghost" onclick="moveTerminalScriptUp(${idx})" style="padding:4px 8px;font-size:12px" title="上移" ${idx === 0 ? 'disabled style="padding:4px 8px;font-size:12px;opacity:0.3;cursor:not-allowed"' : ''}>↑</button>
+          <button class="btn btn-ghost" onclick="moveTerminalScriptDown(${idx})" style="padding:4px 8px;font-size:12px" title="下移" ${idx === scripts.length - 1 ? 'disabled style="padding:4px 8px;font-size:12px;opacity:0.3;cursor:not-allowed"' : ''}>↓</button>
+          <button class="btn btn-primary" onclick="runTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">执行</button>
+          <button class="btn btn-secondary" onclick="editTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">修改</button>
+          <button class="btn btn-danger" onclick="deleteTerminalScript(${idx})" style="padding:4px 8px;font-size:12px">×</button>
+        </div>
       </div>
     `;
   }).join('');
