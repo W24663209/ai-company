@@ -14,6 +14,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ai_company.core.config import settings
 from ai_company.services.build_service import get_active_environment, get_runtime_version
+from ai_company.services.git_service import get_ssh_env
 from ai_company.services.project_service import get_project
 
 router = APIRouter()
@@ -100,6 +101,11 @@ async def terminal_ws(websocket: WebSocket, project_id: str) -> None:
         os.chdir(cwd)
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
+        # Inject SSH keys for git operations in terminal
+        ssh_env = get_ssh_env()
+        env["GIT_SSH_COMMAND"] = ssh_env.get("GIT_SSH_COMMAND", "")
+        if "SSH_AUTH_SOCK" in ssh_env:
+            env["SSH_AUTH_SOCK"] = ssh_env["SSH_AUTH_SOCK"]
         # Set HOME and default PATH
         env["HOME"] = "/home/claudeuser"
         env["PATH"] = "/home/claudeuser/.local/bin:/home/claudeuser/.nvm/versions/node/v24.14.1/bin:/home/claudeuser/.sdkman/candidates/java/current/bin:/usr/local/bin:/usr/bin:/bin"
