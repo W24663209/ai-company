@@ -1232,11 +1232,13 @@ function renderTerminalScripts() {
     const editing = s._editing;
     if (editing) {
       return `
-        <div style="display:flex;align-items:center;gap:8px;background:var(--bg);padding:10px 12px;border-radius:8px;border:1px solid var(--border);width:100%">
-          <input id="edit-script-name-${idx}" value="${escapeHtml(s.name)}" style="width:140px;padding:6px 10px;font-size:13px">
-          <input id="edit-script-cmd-${idx}" value="${escapeHtml(s.cmd)}" style="flex:1;min-width:200px;padding:6px 10px;font-size:13px">
-          <button class="btn btn-primary" onclick="saveEditTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">保存</button>
-          <button class="btn btn-ghost" onclick="cancelEditTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">取消</button>
+        <div style="display:flex;flex-direction:column;gap:6px;background:var(--bg);padding:10px 12px;border-radius:8px;border:1px solid var(--border)">
+          <input id="edit-script-name-${idx}" value="${escapeHtml(s.name)}" style="width:100%;padding:6px 10px;font-size:13px;box-sizing:border-box">
+          <input id="edit-script-cmd-${idx}" value="${escapeHtml(s.cmd)}" style="width:100%;padding:6px 10px;font-size:13px;box-sizing:border-box">
+          <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+            <button class="btn btn-primary" onclick="saveEditTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">保存</button>
+            <button class="btn btn-ghost" onclick="cancelEditTerminalScript(${idx})" style="padding:4px 10px;font-size:12px">取消</button>
+          </div>
         </div>
       `;
     }
