@@ -4641,12 +4641,8 @@ function composeWorkMessage() {
         });
         message += '\n';
       }
-      // Add shared docs content (loaded when sending)
-      const sharedContent = currentWorkMessageData[`${field.name}_content`];
-      if (sharedContent) {
-        message += `${field.label} (共享文档):\n${sharedContent}\n\n`;
-      } else if (value && value.trim()) {
-        // Fallback: show paths if content not loaded yet
+      // Add shared docs paths only (no content preview)
+      if (value && value.trim()) {
         const paths = value.split('\n').filter(p => p.trim());
         if (paths.length > 0) {
           message += `${field.label} (共享文档路径):\n`;
@@ -4741,9 +4737,6 @@ async function sendWorkMessage(reqId) {
     return;
   }
 
-  // Load shared docs content before composing message
-  await loadSharedDocsContentForSending(fields);
-
   const message = composeWorkMessage();
   if (!message) {
     toast('请填写消息内容');
@@ -4771,44 +4764,6 @@ async function sendWorkMessage(reqId) {
   selectedSharedDocs = {}; // Clear selected shared docs
   // Use setTimeout to avoid race condition with toggleChat
   setTimeout(() => renderWorkMessageForm(reqId), 0);
-}
-
-// Load shared docs content for sending
-async function loadSharedDocsContentForSending(fields) {
-  for (const field of fields) {
-    if (field.type === 'file') {
-      const pathsStr = currentWorkMessageData[field.name] || '';
-      const paths = pathsStr.split('\n').filter(p => p.trim());
-
-      if (paths.length > 0) {
-        const fileContents = [];
-        for (const path of paths) {
-          try {
-            const data = await api('GET', `/files/shared?path=${encodeURIComponent(path)}`);
-            if (data.type === 'file' && data.readable) {
-              fileContents.push({
-                path: path,
-                name: data.name,
-                content: data.content
-              });
-            }
-          } catch (e) {
-            console.error('Failed to load shared file:', path, e);
-            fileContents.push({
-              path: path,
-              name: path.split('/').pop() || path,
-              content: `[无法加载文件内容: ${e.message}]`
-            });
-          }
-        }
-
-        // Store content in a separate key for sending
-        currentWorkMessageData[`${field.name}_content`] = fileContents.map(f =>
-          `${f.name}:\n\`\`\`\n${f.content.substring(0, 5000)}${f.content.length > 5000 ? '\n...(truncated)' : ''}\n\`\`\``
-        ).join('\n\n');
-      }
-    }
-  }
 }
 
 // ============================================
@@ -5029,7 +4984,6 @@ window.confirmSharedDocSelection = confirmSharedDocSelection;
 window.closeSharedDocSelector = closeSharedDocSelector;
 window.showSharedDocSelector = showSharedDocSelector;
 window.removeSharedDoc = removeSharedDoc;
-window.loadSharedDocsContentForSending = loadSharedDocsContentForSending;
 
 // ============================================
 // Agent Participation (PM, CodeReviewer, Architect)
