@@ -92,9 +92,11 @@ def read_shared_file_or_list(path: str = ""):
             try:
                 stat = entry.stat()
                 rel = str(entry.relative_to(settings.shared_dir.resolve()))
+                abs_path = str(entry.resolve()).replace("\\", "/")
                 items.append({
                     "name": entry.name,
                     "path": rel.replace("\\", "/"),
+                    "abs_path": abs_path,
                     "is_dir": entry.is_dir(),
                     "size": stat.st_size,
                     "mtime": stat.st_mtime,
@@ -111,10 +113,12 @@ def read_shared_file_or_list(path: str = ""):
         raise HTTPException(status_code=404, detail="File not found")
 
     size = target.stat().st_size
+    abs_path = str(target.resolve()).replace("\\", "/")
     if size > MAX_READ_SIZE:
         return {
             "type": "file",
             "path": path,
+            "abs_path": abs_path,
             "name": target.name,
             "size": size,
             "readable": False,
@@ -126,6 +130,7 @@ def read_shared_file_or_list(path: str = ""):
         return {
             "type": "file",
             "path": path,
+            "abs_path": abs_path,
             "name": target.name,
             "size": size,
             "readable": False,
@@ -140,6 +145,7 @@ def read_shared_file_or_list(path: str = ""):
     return {
         "type": "file",
         "path": path,
+        "abs_path": abs_path,
         "name": target.name,
         "size": size,
         "readable": True,

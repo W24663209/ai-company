@@ -4873,19 +4873,20 @@ async function renderSharedDocSelectorContent(currentPath) {
 
     // Then files
     items.filter(item => !item.is_dir).forEach(file => {
-      const isSelected = selectedSharedDocs[document.getElementById('shared-doc-selector-modal').dataset.fieldName]?.includes(file.path);
+      const selectPath = file.abs_path || file.path;
+      const isSelected = selectedSharedDocs[document.getElementById('shared-doc-selector-modal').dataset.fieldName]?.includes(selectPath);
       const icon = getFileIconByName(file.name);
       html += `
         <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--surface);border-radius:8px;cursor:pointer;"
-             onclick="const cb = this.querySelector('input[type=checkbox]'); cb.checked = !cb.checked; toggleSharedDocSelection('${file.path}', cb.checked);"
+             onclick="const cb = this.querySelector('input[type=checkbox]'); cb.checked = !cb.checked; toggleSharedDocSelection('${selectPath}', cb.checked);"
              onmouseenter="this.style.background='var(--surface-hover)'" onmouseleave="this.style.background='var(--surface)'">
           <span style="font-size:20px;">${icon}</span>
           <span style="flex:1;pointer-events:none;">
             <div style="font-weight:500;">${escapeHtml(file.name)}</div>
-            <div style="font-size:11px;color:var(--text-muted);">${formatFileSize(file.size)}</div>
+            <div style="font-size:11px;color:var(--text-muted);word-break:break-all;">${escapeHtml(selectPath)}</div>
           </span>
           <input type="checkbox" ${isSelected ? 'checked' : ''}
-                 onclick="event.stopPropagation(); toggleSharedDocSelection('${file.path}', this.checked);"
+                 onclick="event.stopPropagation(); toggleSharedDocSelection('${selectPath}', this.checked);"
                  style="width:18px;height:18px;cursor:pointer;">
         </div>
       `;
